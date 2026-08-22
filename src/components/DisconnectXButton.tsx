@@ -55,9 +55,10 @@ export function DisconnectXButton() {
   if (step === "initial") {
     return (
       <button
+        type="button"
         onClick={handleClick}
         disabled={loading}
-        className="px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
+        className="label-mono border border-hairline px-3 py-2 text-ink-subtle transition-colors duration-150 hover:border-danger hover:text-danger disabled:opacity-50"
       >
         Desconectar
       </button>
@@ -65,23 +66,25 @@ export function DisconnectXButton() {
   }
 
   return (
-    <div className="flex gap-2 items-center">
-      <span className="text-sm text-gray-700">¿Seguro?</span>
+    <div className="flex items-center gap-2">
+      <span className="text-sm text-ink-subtle">¿Seguro?</span>
       <button
+        type="button"
         onClick={handleClick}
         disabled={loading}
-        className="px-3 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded transition-colors disabled:opacity-50"
+        className="label-mono border border-danger bg-danger px-3 py-2 text-brand-white transition-colors duration-150 hover:opacity-90 disabled:opacity-50"
       >
-        {loading ? "Desconectando..." : "Sí, desconectar"}
+        {loading ? "Desconectando…" : "Sí, desconectar"}
       </button>
       <button
+        type="button"
         onClick={handleCancel}
         disabled={loading}
-        className="px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded transition-colors disabled:opacity-50"
+        className="label-mono border border-hairline px-3 py-2 text-ink-subtle transition-colors duration-150 hover:text-ink disabled:opacity-50"
       >
         Cancelar
       </button>
-      {error && <span className="text-sm text-red-600">{error}</span>}
+      {error && <span className="text-xs text-danger">{error}</span>}
     </div>
   );
 }

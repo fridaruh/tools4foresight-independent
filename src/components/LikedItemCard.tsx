@@ -12,9 +12,9 @@ export function LikedItemCard({
 }: {
   item: BoardItem;
   onOpen: () => void;
-  /** Corazón de favoritos, esquina superior derecha. Solo lo pasa /senales.
-      Va como hermano absoluto del boton de la tarjeta (un boton no puede
-      anidar otro boton). */
+  /** Corazón de favoritos, esquina superior derecha. Nadie lo pasa hoy — punto
+      de extensión sin caller activo. Va como hermano absoluto del boton de la
+      tarjeta (un boton no puede anidar otro boton). */
   favoriteButton?: React.ReactNode;
 }) {
   const image = item.contentImageUrl ?? item.mediaUrls[0] ?? null;

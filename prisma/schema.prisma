@@ -221,6 +221,11 @@ model XAuthToken {
   id           String   @id @default(uuid())
   userId       String   @unique @map("user_id")
   xUserId      String   @map("x_user_id")
+  // @handle de la cuenta conectada (sin arroba), leído de /2/users/me en el
+  // callback (PLAN 4.2): xUserId es el ID numérico y no se puede mostrar tal
+  // cual en /conexion. Null en tokens creados antes de esta columna hasta la
+  // próxima reconexión.
+  xUsername    String?  @map("x_username")
   accessToken  String   @map("access_token") // cifrado a nivel de aplicación
   refreshToken String   @map("refresh_token") // cifrado a nivel de aplicación
   expiresAt    DateTime @map("expires_at")

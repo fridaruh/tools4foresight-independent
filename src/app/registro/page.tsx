@@ -5,19 +5,17 @@ import { getEffectiveRole } from "@/lib/require-user";
 
 export const metadata = { robots: { index: false, follow: false } };
 
-// Registro con email + contraseña (Fase 1.5): la alternativa al magic link
-// para quien prefiere una contraseña de siempre. Mismo signup abierto y mismo
-// rol member por default que el magic link (ver src/lib/auth.ts).
+// Registro con email + contraseña: la alternativa al magic link para quien
+// prefiere una contraseña de siempre. El signup crea el tenant (seedTenant) y
+// entra directo a su cockpit — no hay plan que elegir (ver src/lib/auth.ts).
 export default async function RegistroPage({
   searchParams,
 }: {
   searchParams: Promise<{ from?: string }>;
 }) {
   const { from } = await searchParams;
-  // Destino por default: /suscripcion. Una cuenta nueva no tiene acceso hasta
-  // suscribirse, asi que mandarla a /categorias solo añadia un rebote (el gate
-  // la traeria aqui igual). Si viene de la landing, `from` ya trae el plan.
-  const redirectTo = from && from.startsWith("/") ? from : "/suscripcion";
+  // "/" es el cockpit de catalogo de cada usuario (PLAN 4.1).
+  const redirectTo = from && from.startsWith("/") ? from : "/";
   const loginHref = from && from.startsWith("/") ? `/login?from=${encodeURIComponent(from)}` : "/login";
 
   const role = await getEffectiveRole();
@@ -31,8 +29,7 @@ export default async function RegistroPage({
       <header>
         <h1 className="section-title text-ink">Crear cuenta</h1>
         <p className="text-sm text-ink-subtle">
-          Paso 1 de 2: tu email y una contraseña. En el siguiente paso eliges el plan y entras
-          al banco.
+          Tu nombre, email y una contraseña. Entras directo a tu banco de señales.
         </p>
       </header>
 

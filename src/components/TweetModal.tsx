@@ -68,7 +68,8 @@ export function TweetModal({
   tldr?: string | null;
   impact?: string | null;
   whyMatters?: string | null;
-  /** Corazón de favoritos (esquina superior derecha). Solo lo pasa /senales. */
+  /** Corazón de favoritos (esquina superior derecha). Nadie lo pasa hoy — punto
+      de extensión sin caller activo. */
   favoriteButton?: React.ReactNode;
   onClose: () => void;
   onPrev?: () => void;

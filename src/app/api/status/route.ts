@@ -24,7 +24,7 @@ export async function GET() {
       const [token, cursor, quota, likedItemsCount, jobRuns] = await Promise.all([
         tx.xAuthToken.findFirst({
           where: { userId: ownerId },
-          select: { xUserId: true, createdAt: true },
+          select: { xUserId: true, xUsername: true, createdAt: true },
         }),
         tx.ingestionCursor.findFirst({
           where: { userId: ownerId },
@@ -60,12 +60,11 @@ export async function GET() {
   ]);
 
   return NextResponse.json({
-    // `xUsername` sale de x_auth_tokens.x_user_id, que es el ID numérico de X, no
-    // el @handle: la tabla no guarda el handle. Se devuelven los dos campos para
-    // que la UI no tenga que adivinar cuál está mirando.
     xConnected: Boolean(tenant.token),
     xUserId: tenant.token?.xUserId ?? null,
-    xUsername: tenant.token?.xUserId ?? null,
+    // Null en tokens conectados antes de que el callback empezara a guardar el
+    // @handle (PLAN 4.2): la UI cae al xUserId numérico en ese caso.
+    xUsername: tenant.token?.xUsername ?? null,
     xConnectedAt: tenant.token?.createdAt ?? null,
 
     cursor: {

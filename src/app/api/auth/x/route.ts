@@ -8,7 +8,7 @@ import { withOwner } from "@/lib/tenant-db";
  * Desconecta la cuenta de X del usuario. Borra el token de autenticación pero
  * NO borra los liked_items ya ingestados (para que no pierda el trabajo hecho).
  */
-export async function DELETE(request: Request) {
+export async function DELETE() {
   const userOrResponse = await requireUserApi();
   if (userOrResponse instanceof NextResponse) {
     return userOrResponse;

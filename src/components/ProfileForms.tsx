@@ -184,6 +184,104 @@ export function ProfileForms({
           <StatusNote status={passwordStatus} />
         </form>
       </Card>
+
+      <DeleteAccountCard />
     </div>
+  );
+}
+
+/**
+ * Borrar cuenta (PLAN 4.7): dos pasos — primero "quiero borrar", después
+ * escribir "BORRAR" a mano. Sin el segundo paso un click accidental en el
+ * primer botón se llevaría el banco completo; escribir la palabra es la
+ * misma fricción deliberada que un `rm -rf` pide confirmación de verdad.
+ */
+function DeleteAccountCard() {
+  const [step, setStep] = useState<"idle" | "confirm">("idle");
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function deleteAccount(event: React.FormEvent) {
+    event.preventDefault();
+    setDeleting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/perfil", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirm: confirmText }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        setError(data?.error ?? "No se pudo borrar la cuenta");
+        setDeleting(false);
+        return;
+      }
+      // El DELETE ya cerró la sesión en el server; navegación dura a la
+      // landing para que la nav (con sesión activa en memoria) no se confunda.
+      window.location.assign("/");
+    } catch {
+      setError("No se pudo conectar con el servidor");
+      setDeleting(false);
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3 rounded-xl border border-danger/40 bg-surface-1 p-4">
+      <h2 className="label-mono text-danger">Zona de peligro</h2>
+      <p className="text-xs text-ink-tertiary">
+        Borra tu cuenta y todo tu banco: catálogo, categorías, grafo, cuotas y la conexión con X.
+        No hay vuelta atrás.
+      </p>
+
+      {step === "idle" ? (
+        <button
+          type="button"
+          onClick={() => setStep("confirm")}
+          className="label-mono self-start border border-danger px-3 py-2 text-danger transition-colors duration-150 hover:bg-danger hover:text-brand-white"
+        >
+          Borrar mi cuenta
+        </button>
+      ) : (
+        <form onSubmit={deleteAccount} className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="text-xs text-ink-tertiary">
+              Escribe <strong className="text-ink">BORRAR</strong> para confirmar
+            </span>
+            <input
+              type="text"
+              required
+              autoFocus
+              value={confirmText}
+              onChange={(e) => setConfirmText(e.target.value)}
+              className={INPUT_CLASS}
+            />
+          </label>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={deleting || confirmText !== "BORRAR"}
+              className="label-mono self-start border border-danger bg-danger px-3 py-2 text-brand-white transition-colors duration-150 hover:opacity-90 disabled:opacity-50"
+            >
+              {deleting ? "Borrando…" : "Borrar definitivamente"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setStep("idle");
+                setConfirmText("");
+                setError(null);
+              }}
+              disabled={deleting}
+              className="label-mono self-start border border-hairline px-3 py-2 text-ink-subtle hover:text-ink disabled:opacity-50"
+            >
+              Cancelar
+            </button>
+          </div>
+          {error && <p className="text-xs text-danger">{error}</p>}
+        </form>
+      )}
+    </section>
   );
 }

@@ -1,7 +1,7 @@
 import { cookies } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 import { encryptToken } from "@/lib/token-crypto";
-import { exchangeCodeForTokens, fetchAuthenticatedUserId, verifyOAuthState } from "@/lib/x-oauth";
+import { exchangeCodeForTokens, fetchAuthenticatedXUser, verifyOAuthState } from "@/lib/x-oauth";
 import { getSessionUser } from "@/lib/require-user";
 import { withOwner, withPlatformBypass } from "@/lib/tenant-db";
 
@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
   cookieStore.delete("x_oauth_code_verifier");
 
   const tokens = await exchangeCodeForTokens({ code, codeVerifier });
-  const xUserId = await fetchAuthenticatedUserId(tokens.access_token);
+  const { id: xUserId, username: xUsername } = await fetchAuthenticatedXUser(tokens.access_token);
 
   if (!tokens.refresh_token) {
     return NextResponse.json(
@@ -73,11 +73,12 @@ export async function GET(request: NextRequest) {
       create: {
         userId: sessionUser.userId,
         xUserId,
+        xUsername,
         accessToken,
         refreshToken,
         expiresAt,
       },
-      update: { accessToken, refreshToken, expiresAt },
+      update: { xUsername, accessToken, refreshToken, expiresAt },
     });
 
     // El cursor de ingesta es 1:1 con el usuario; se crea vacío si es la

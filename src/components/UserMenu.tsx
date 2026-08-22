@@ -10,14 +10,7 @@ import { useRouter } from "next/navigation";
  * de better-auth (con la cookie legacy de Fase 0 no hay usuario que editar
  * — ahí la nav sigue mostrando el "Salir" plano).
  */
-export function UserMenu({
-  user,
-  showSubscription = false,
-}: {
-  user: { name: string; email: string };
-  /** Members: enlace a /suscripcion (el admin no paga). */
-  showSubscription?: boolean;
-}) {
+export function UserMenu({ user }: { user: { name: string; email: string } }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -87,16 +80,6 @@ export function UserMenu({
           >
             Mi perfil
           </Link>
-          {showSubscription && (
-            <Link
-              href="/suscripcion"
-              role="menuitem"
-              onClick={() => setOpen(false)}
-              className="label-mono block px-3 py-2.5 text-xs text-ink-subtle transition-colors duration-150 hover:bg-surface-1 hover:text-ink"
-            >
-              Mi suscripción
-            </Link>
-          )}
           <button
             type="button"
             role="menuitem"

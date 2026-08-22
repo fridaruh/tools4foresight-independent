@@ -15,7 +15,7 @@ const SECTIONS = [
   // El grafo entra como 03 y recorre lo que sigue (decision de Frida, 2026-08-19).
   { href: "/grafo", label: "Grafo", index: "03", section: "grafo" },
   { href: "/horizontes", label: "Horizontes", index: "04", section: "horizontes" },
-  { href: "/categorias", label: "Taxonomía", index: "05", section: "categorias" },
+  { href: "/categorias", label: "Categorías", index: "05", section: "categorias" },
   { href: "/conexion", label: "Sistema", index: "06", section: "conexion" },
 ];
 

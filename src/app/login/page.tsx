@@ -4,11 +4,6 @@ import { MagicLinkForm } from "@/components/MagicLinkForm";
 import { PasswordLoginForm } from "@/components/PasswordAuthForms";
 import { getEffectiveRole } from "@/lib/require-user";
 
-const ERROR_LABEL: Record<string, string> = {
-  "1": "Password incorrecta.",
-  rate_limited: "Demasiados intentos. Espera unos minutos.",
-};
-
 // Adonde redirige el verify del magic link cuando el token no sirve (ver
 // errorCallbackURL en MagicLinkForm). Sin esto el error caia en "/" y la landing
 // lo ignoraba: parecia que el login "no hacia nada".
@@ -24,13 +19,12 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string; from?: string }>;
 }) {
   const { error, from } = await searchParams;
-  // La home del member (tarjetas por categoria) es el destino por default:
-  // mandar a "/" dejaba a los miembros en la landing publica despues de
-  // autenticarse.
-  const redirectTo = from && from.startsWith("/") ? from : "/categorias";
+  // "/" es el cockpit de catalogo de cada usuario (PLAN 4.1): mandar ahi por
+  // default, o de vuelta a donde el proxy interrumpio (`from`).
+  const redirectTo = from && from.startsWith("/") ? from : "/";
 
-  // Con sesion activa no hay nada que pedir aqui: a su vista segun rol. (El proxy
-  // no cubre /login, asi que el redirect vive en la propia pagina.)
+  // Con sesion activa no hay nada que pedir aqui. (El proxy no cubre /login,
+  // asi que el redirect vive en la propia pagina.)
   const role = await getEffectiveRole();
   if (role !== null) redirect("/");
 
@@ -70,31 +64,6 @@ export default async function LoginPage({
         <div className="mt-3">
           <MagicLinkForm redirectTo={redirectTo} />
         </div>
-      </details>
-
-      {/* Parche de Fase 0 mientras se confirma que el magic link llega: se retira
-          en cuanto el envío por email quede verificado en producción. */}
-      <details className="text-sm text-ink-subtle">
-        <summary className="label-mono cursor-pointer text-ink-tertiary">
-          Acceso admin (gate temporal de Fase 0)
-        </summary>
-        <form method="POST" action="/api/auth/login" className="mt-3 flex flex-col gap-3">
-          <input type="hidden" name="from" value={redirectTo} />
-          <input
-            type="password"
-            name="password"
-            className="border border-hairline bg-surface-1 px-3 py-2 text-sm text-ink outline-none focus-visible:border-ink"
-          />
-          <button
-            type="submit"
-            className="label-mono border border-hairline bg-canvas px-3 py-2 text-ink hover:bg-surface-2"
-          >
-            Entrar
-          </button>
-          {error && !magicError && (
-            <p className="text-xs text-danger">{ERROR_LABEL[error] ?? "Algo falló, intenta de nuevo."}</p>
-          )}
-        </form>
       </details>
     </div>
   );

@@ -15,13 +15,10 @@ export function FiltersBar({
   filters,
   onChange,
   resultCount,
-  audience = "admin",
 }: {
   filters: LikedItemsFilters;
   onChange: (next: LikedItemsFilters) => void;
   resultCount: number;
-  /** En "member" los conteos por categoria se piden solo sobre lo publicado. */
-  audience?: "admin" | "member";
 }) {
   const [options, setOptions] = useState<CategoryOption[]>([]);
   const [uncategorized, setUncategorized] = useState(0);
@@ -31,15 +28,14 @@ export function FiltersBar({
   const pestelRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const scope = audience === "member" ? "?scope=published" : "";
-    fetch(`/api/categories${scope}`)
+    fetch("/api/categories")
       .then((res) => res.json())
       .then((data: { options: CategoryOption[]; uncategorized: number }) => {
         setOptions(data.options);
         setUncategorized(data.uncategorized);
       })
       .catch(() => {});
-  }, [audience]);
+  }, []);
 
   useEffect(() => {
     if (!open && !pestelOpen) return;

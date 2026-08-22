@@ -26,18 +26,26 @@ export function RunJobButton({ path, label }: { path: string; label: string }) {
         updated?: number;
         error?: string;
         errors?: string[];
+        // `/api/sync` y `/api/jobs/graph/now` devuelven formas propias: un resumen
+        // de una línea el primero, dos sub-resultados el segundo.
+        summary?: string;
+        graph?: { ok?: boolean; error?: string };
       };
 
       const pending = data.remaining ? ` · faltan ${data.remaining}` : " · listo";
 
       if (!res.ok || data.ok === false) {
-        setMessage(data.error ?? data.errors?.[0] ?? "El job falló");
+        setMessage(data.error ?? data.errors?.[0] ?? data.graph?.error ?? "El job falló");
+      } else if (typeof data.summary === "string") {
+        setMessage(data.summary);
       } else if (typeof data.categorized === "number") {
         setMessage(`${data.categorized} categorizados${pending}`);
       } else if (typeof data.impacts === "number") {
         // El analisis escribe dos textos por item y casi nunca termina de una:
         // 600 items son ~1200 llamadas al modelo y no caben en una sola corrida.
         setMessage(`${data.impacts} impactos · ${data.whyMatters} por qué importa${pending}`);
+      } else if (data.graph) {
+        setMessage("Grafo recalculado");
       } else {
         setMessage("Listo");
       }

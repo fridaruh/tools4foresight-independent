@@ -160,7 +160,19 @@ export async function refreshAccessToken(refreshToken: string): Promise<XTokenRe
   return res.json();
 }
 
-export async function fetchAuthenticatedUserId(accessToken: string): Promise<string> {
+export type AuthenticatedXUser = {
+  id: string;
+  /** @handle sin arroba, tal como lo devuelve /2/users/me. */
+  username: string;
+};
+
+/**
+ * Trae id + @handle de la cuenta que acaba de autorizar. El callback guarda los
+ * dos: `id` es la clave estable (lo que ya usaba el chequeo de "cuenta ya
+ * conectada"), `username` es lo único legible que /conexion le puede mostrar al
+ * usuario (PLAN 4.2).
+ */
+export async function fetchAuthenticatedXUser(accessToken: string): Promise<AuthenticatedXUser> {
   const res = await fetch(X_ME_URL, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -170,6 +182,6 @@ export async function fetchAuthenticatedUserId(accessToken: string): Promise<str
     throw new Error(`Fallo al obtener el usuario autenticado (${res.status}): ${text}`);
   }
 
-  const json = (await res.json()) as { data: { id: string } };
-  return json.data.id;
+  const json = (await res.json()) as { data: { id: string; username: string } };
+  return { id: json.data.id, username: json.data.username };
 }

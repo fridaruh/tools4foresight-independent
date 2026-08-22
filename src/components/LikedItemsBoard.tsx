@@ -21,20 +21,13 @@ export function LikedItemsBoard({
   initialTotal,
   initialNextOffset,
   initialFilters,
-  audience = "admin",
 }: {
   initialItems: BoardItem[];
   initialTotal: number;
   initialNextOffset: number | null;
   initialFilters: LikedItemsFilters;
-  /**
-   * "member" es el mismo board montado en /senales: la API ya escopea a lo
-   * publicado por rol; aqui solo cambian la URL que refleja los filtros y el
-   * copy del estado vacio (un member no tiene boton de sincronizar).
-   */
-  audience?: "admin" | "member";
 }) {
-  const basePath = audience === "member" ? "/senales" : "/";
+  const basePath = "/";
   const [view, setView] = useState<ViewMode>("cards");
   const [filters, setFilters] = useState(initialFilters);
   const [items, setItems] = useState(initialItems);
@@ -51,10 +44,6 @@ export function LikedItemsBoard({
   const fetchPage = useCallback(async (next: LikedItemsFilters, offset: number) => {
     const params = filtersToSearchParams(next);
     params.set("offset", String(offset));
-    // scope=published: un admin parado en /senales tiene que ver exactamente lo
-    // que ve un member; sin esto la API le devolveria tambien lo no publicado y
-    // filtrar contradiria la primera pagina del server.
-    if (audience === "member") params.set("scope", "published");
     const res = await fetch(`/api/liked-items?${params}`);
     if (!res.ok) throw new Error("No se pudo cargar la lista");
     return (await res.json()) as {
@@ -62,7 +51,7 @@ export function LikedItemsBoard({
       total: number;
       nextOffset: number | null;
     };
-  }, [audience]);
+  }, []);
 
   useEffect(() => {
     if (isFirstRender.current) {
@@ -137,7 +126,7 @@ export function LikedItemsBoard({
 
   return (
     <div className="flex flex-col gap-5">
-      <FiltersBar filters={filters} onChange={setFilters} resultCount={total} audience={audience} />
+      <FiltersBar filters={filters} onChange={setFilters} resultCount={total} />
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-ink-subtle">
@@ -149,20 +138,12 @@ export function LikedItemsBoard({
       {items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-hairline-strong py-16 text-center">
           <p className="text-sm font-medium text-ink">
-            {hasFilters
-              ? audience === "member"
-                ? "Ninguna señal coincide con estos filtros"
-                : "Ningún like coincide con estos filtros"
-              : audience === "member"
-                ? "Todavía no hay señales publicadas"
-                : "Todavía no hay likes sincronizados"}
+            {hasFilters ? "Ningún like coincide con estos filtros" : "Todavía no hay likes sincronizados"}
           </p>
           <p className="text-sm text-ink-subtle">
             {hasFilters
               ? "Prueba con un rango de fechas más amplio o quita alguna categoría."
-              : audience === "member"
-                ? "Vuelve pronto: el banco se alimenta todos los días."
-                : "Usa el botón de sincronizar arriba a la derecha para traer tus likes de X."}
+              : "Usa el botón de sincronizar arriba a la derecha para traer tus likes de X."}
           </p>
         </div>
       ) : view === "cards" ? (
