@@ -1,4 +1,33 @@
-import { prisma } from "@/lib/prisma";
+/**
+ * Grafo semántico POR TENANT (PLAN §3.9).
+ *
+ * Rehace todo lo derivado de los embeddings de UN owner: aristas → temas con
+ * linaje → vitalidad → indicadores → horizonte → snapshot. No embebe nada (eso es
+ * src/lib/jobs/embed.ts); el bautizo de temas nuevos o cambiados va al chat de
+ * ollama.com con la key global de la plataforma.
+ *
+ * ── Aislamiento ──────────────────────────────────────────────────────────────
+ * Este archivo es el que más SQL crudo tiene del proyecto, y el SQL crudo NO pasa
+ * por la extensión de Prisma que inyecta `ownerId`. Dos reglas, sin excepción:
+ *   1. Todo corre dentro de `withOwner(ownerId, …)`, que fija `app.owner_id` LOCAL
+ *      a la transacción (única forma que funciona con el pooler de Neon).
+ *   2. Además, CADA query lleva su `owner_id = $1` explícito. RLS es la red de
+ *      seguridad, no el filtro: si mañana alguien corre esto con bypass, el SQL
+ *      sigue siendo de un solo tenant.
+ * El "centroide global" de la novedad es el centroide DEL TENANT, y los cuantiles
+ * de horizonte se calculan sobre los temas vivos DEL TENANT.
+ *
+ * ── Forma de la corrida ──────────────────────────────────────────────────────
+ *   Fase A (tx de lectura): recomputeLinks + leer items, aristas y linajes.
+ *   Fase B (SIN tx):        detectar comunidades, emparejar linajes y BAUTIZAR
+ *                           con Ollama — son decenas de segundos de red y no
+ *                           tienen por qué ocupar una conexión del pooler.
+ *   Fase C (tx de escritura): crear/actualizar temas, vitalidad, indicadores
+ *                           (pgvector), horizontes, snapshot y `graphDirtyAt=null`.
+ * Ambas transacciones piden 120 s de timeout: la fase C hace un UPDATE por tema
+ * más dos queries de pgvector por tema, y con catálogos grandes los 30 s por
+ * defecto no alcanzan.
+ */
 import {
   MIN_CLUSTER_SIZE,
   detectCommunities,
@@ -7,6 +36,9 @@ import {
   type GraphEdge,
   type GraphNode,
 } from "@/lib/jobs/clusters";
+import type { HorizonKey } from "@/lib/horizons";
+import { budgetExceeded, type JobFn, type JobResult } from "@/lib/jobs/types";
+import { withOwner, type TenantTx } from "@/lib/tenant-db";
 
 // Umbral de similitud coseno para que un par de señales sea arista, y cuantos
 // vecinos como maximo aporta cada señal. Ajustables por env sin tocar codigo:
@@ -27,8 +59,16 @@ const DEAD_THRESHOLD = 1.0;
 // tema que aquel linaje". Por debajo, el tema viejo muere y nace uno nuevo.
 const LINEAGE_JACCARD = 0.3;
 
+/** Tope de las dos transacciones del job (ver cabecera). */
+const TX_TIMEOUT_MS = 120_000;
+
+/** Margen mínimo para arrancar una corrida completa desde `runGraph`. Por debajo
+ *  ni se intenta: media corrida no sirve de nada y deja temas sin snapshot. */
+const MIN_BUDGET_MS = 45_000;
+
 export type GraphTrigger = "embed" | "cron" | "publish" | "manual";
-export type Horizon = "H1" | "H2" | "H3";
+/** Alias histórico; la fuente de verdad de los horizontes es src/lib/horizons.ts. */
+export type Horizon = HorizonKey;
 
 type Item = {
   id: string;
@@ -63,86 +103,180 @@ type ClusterStats = {
   bridgeClusters: number;
 };
 
+/** Una comunidad ya emparejada con su linaje y (si hacía falta) bautizada. */
+type PlannedCluster = {
+  members: string[];
+  hash: string;
+  prev: ClusterRow | null;
+  /** null = la membresía no cambió, se reusa el nombre del linaje tal cual. */
+  title: { name: string; summary: string } | null;
+};
+
+type ResolvedCluster = {
+  clusterId: string;
+  members: string[];
+  hash: string;
+  existing: ClusterRow | null;
+};
+
+export type GraphSummary = {
+  ok: boolean;
+  trigger: GraphTrigger;
+  snapshotId: string;
+  nodes: number;
+  links: number;
+  clusters: number;
+  named: number;
+  reused: number;
+  alive: number;
+  dead: number;
+  died: number;
+  revived: number;
+  orphans: number;
+  clusterErrors?: string[];
+};
+
+// ---------------------------------------------------------------------------
+// Punto de entrada del job (contrato de src/lib/jobs/types.ts)
+// ---------------------------------------------------------------------------
+
+/** `chain` (lo dispara /api/sync) es, para efectos del snapshot, una corrida
+ *  manual: la pidió una persona. */
+function graphTrigger(trigger: "cron" | "manual" | "chain"): GraphTrigger {
+  return trigger === "chain" ? "manual" : trigger;
+}
+
 /**
- * Rehace TODO lo derivado del grafo semantico a partir de los embeddings que ya
- * existen: aristas → temas con linaje → vitalidad → indicadores → horizonte →
- * snapshot. No necesita Ollama local (no embebe nada); el bautizo de temas nuevos
- * o cambiados va al chat de ollama.com como siempre.
- *
- * Lo llaman el job de embeddings (local), el cron diario /api/jobs/graph (Vercel,
- * para que el decaimiento avance aunque nadie publique) y el PATCH que publica o
- * despublica una señal. Es idempotente: correrlo dos veces seguidas produce dos
- * snapshots iguales salvo la fecha.
+ * Corre el grafo completo del tenant. No es incremental ni reanudable: o entra
+ * entera o no entra, así que el presupuesto se evalúa una sola vez al principio.
  */
-// TODO(fase3.9): parametrizar CADA query de este archivo con owner_id (incluidos
-// los $queryRaw de recomputeLinks y de los cuantiles de horizonte) y envolver todo
-// en withOwner(ownerId, ...). Hoy `ownerId` solo se usa para ESCRIBIR con dueño;
-// la lectura la acota RLS, que sin contexto devuelve cero filas — o sea, el job
-// falla en vacio en vez de cruzar tenants, pero todavia no hace su trabajo.
-export async function refreshGraph(ownerId: string, trigger: GraphTrigger) {
+export const runGraph: JobFn = async (ctx): Promise<JobResult> => {
+  if (budgetExceeded(ctx, MIN_BUDGET_MS)) {
+    return { ok: true, processed: 0, remaining: 1, stoppedOnBudget: true };
+  }
+
+  try {
+    const summary = await refreshGraph(ctx.ownerId, graphTrigger(ctx.trigger));
+    return {
+      ok: summary.ok,
+      processed: summary.nodes,
+      remaining: 0,
+      stoppedOnBudget: false,
+      ...(summary.clusterErrors ? { error: summary.clusterErrors[0] } : {}),
+      details: { ...summary },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      processed: 0,
+      remaining: 1,
+      stoppedOnBudget: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+};
+
+// ---------------------------------------------------------------------------
+// refreshGraph: el trabajo de verdad
+// ---------------------------------------------------------------------------
+
+/**
+ * Interna al job: la llama `runGraph`. Sigue exportada porque `/api/jobs/graph`
+ * y el PATCH de publicar todavía la usan mientras aterrizan las tareas 3.10 y
+ * 3.11; cuando esas pasen a `runGraph(ctx)`, deja de exportarse.
+ *
+ * Es idempotente: correrla dos veces seguidas produce dos snapshots iguales salvo
+ * la fecha.
+ */
+export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Promise<GraphSummary> {
   const now = new Date();
-  const links = await recomputeLinks();
 
-  const [rawItems, rawLinks, existing] = await Promise.all([
-    prisma.likedItem.findMany({
-      where: { publishStatus: "published", embeddedAt: { not: null } },
-      select: { id: true, contentTitle: true, tweetText: true, tldr: true, likedAt: true },
-    }),
-    prisma.semanticLink.findMany({
-      where: { itemA: { publishStatus: "published" }, itemB: { publishStatus: "published" } },
-      select: { itemAId: true, itemBId: true, score: true },
-    }),
-    prisma.semanticCluster.findMany({
-      select: {
-        id: true,
-        name: true,
-        summary: true,
-        membersHash: true,
-        status: true,
-        lastMemberIds: true,
-        horizon: true,
-        horizonSource: true,
-        revivedCount: true,
-      },
-    }),
-  ]);
+  // ── Fase A: aristas + lectura ─────────────────────────────────────────────
+  const read = await withOwner(
+    ownerId,
+    async (tx) => {
+      const links = await recomputeLinks(tx, ownerId);
 
-  const items: Item[] = rawItems.map((i) => ({
+      // Secuencial y no Promise.all: dentro de una transacción interactiva todo
+      // va por la misma conexión, así que el paralelismo no compra nada y sí
+      // complica el diagnóstico cuando una de las tres falla.
+      const rawItems = await tx.likedItem.findMany({
+        where: { ownerId, publishStatus: "published", embeddedAt: { not: null } },
+        select: { id: true, contentTitle: true, tweetText: true, tldr: true, likedAt: true },
+      });
+      const rawLinks = await tx.semanticLink.findMany({
+        where: {
+          ownerId,
+          itemA: { ownerId, publishStatus: "published" },
+          itemB: { ownerId, publishStatus: "published" },
+        },
+        select: { itemAId: true, itemBId: true, score: true },
+      });
+      const existing = await tx.semanticCluster.findMany({
+        where: { ownerId },
+        select: {
+          id: true,
+          name: true,
+          summary: true,
+          membersHash: true,
+          status: true,
+          lastMemberIds: true,
+          horizon: true,
+          horizonSource: true,
+          revivedCount: true,
+        },
+      });
+
+      return { links, rawItems, rawLinks, existing };
+    },
+    { timeoutMs: TX_TIMEOUT_MS },
+  );
+
+  const items: Item[] = read.rawItems.map((i) => ({
     id: i.id,
     title: i.contentTitle ?? i.tweetText.slice(0, 90),
     tldr: i.tldr,
     likedAt: i.likedAt,
   }));
   const itemById = new Map(items.map((i) => [i.id, i]));
-  const edges: GraphEdge[] = rawLinks.map((l) => ({ a: l.itemAId, b: l.itemBId, score: l.score }));
+  const edges: GraphEdge[] = read.rawLinks.map((l) => ({
+    a: l.itemAId,
+    b: l.itemBId,
+    score: l.score,
+  }));
+  const existing = read.existing;
 
-  // 1. Comunidades de esta corrida.
+  // ── Fase B: comunidades, linajes y bautizo (fuera de transacción) ─────────
   const communities = detectCommunities(
     items.map((i) => i.id),
     edges,
   ).filter((members) => members.length >= MIN_CLUSTER_SIZE);
 
-  // 2. Emparejar con linajes existentes por solapamiento de miembros.
   const matches = matchLineages(communities, existing);
 
-  // 3. Bautizo: solo temas nuevos o cuya membresia cambio.
   const errors: string[] = [];
   let named = 0;
   let reused = 0;
-  const resolved: { clusterId: string; members: string[]; hash: string; existing: ClusterRow | null }[] = [];
+  const planned: PlannedCluster[] = [];
+
   for (let i = 0; i < communities.length; i += 1) {
     const members = communities[i];
     const hash = membersHash(members);
     const prev = matches[i];
+
+    // Cache por hash de membresía: si el tema es el mismo, no se vuelve a pagar
+    // una llamada al modelo.
     if (prev && prev.membersHash === hash && prev.summary !== "") {
       reused += 1;
-      resolved.push({ clusterId: prev.id, members, hash, existing: prev });
+      planned.push({ members, hash, prev, title: null });
       continue;
     }
+
     const nodes: GraphNode[] = members
       .map((id) => itemById.get(id))
       .filter((n): n is Item => Boolean(n))
       .map((n) => ({ id: n.id, title: n.title, tldr: n.tldr }));
+
     let title: { name: string; summary: string };
     try {
       title = await nameCluster(nodes);
@@ -151,245 +285,304 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger) {
       // Un bautizo que falla no tumba la corrida: el tema entra (o sigue) con
       // nombre provisional y summary vacio, y la siguiente corrida lo reintenta.
       errors.push(error instanceof Error ? error.message : String(error));
-      title = prev ? { name: prev.name, summary: "" } : { name: `Tema de ${members.length} señales`, summary: "" };
+      title = prev
+        ? { name: prev.name, summary: "" }
+        : { name: `Tema de ${members.length} señales`, summary: "" };
     }
-    if (prev) {
-      await prisma.semanticCluster.update({
-        where: { id: prev.id },
-        data: { name: title.name, summary: title.summary },
-      });
-      resolved.push({ clusterId: prev.id, members, hash, existing: prev });
-    } else {
-      const created = await prisma.semanticCluster.create({
-        data: {
-          ownerId,
-          name: title.name,
-          summary: title.summary,
-          membersHash: hash,
-          size: members.length,
-        },
-      });
-      resolved.push({ clusterId: created.id, members, hash, existing: null });
-    }
+    planned.push({ members, hash, prev, title });
   }
 
-  // 4. Vitalidad por señal.
-  const clusterOfItem = new Map<string, string>();
-  for (const r of resolved) for (const id of r.members) clusterOfItem.set(id, r.clusterId);
-  const vitality = computeVitality(items, edges, clusterOfItem, now);
+  // ── Fase C: escritura ─────────────────────────────────────────────────────
+  const written = await withOwner(
+    ownerId,
+    async (tx) => {
+      // 1. Materializar los temas (crear los nuevos, renombrar los que cambiaron).
+      const resolved: ResolvedCluster[] = [];
+      for (const p of planned) {
+        if (p.title === null && p.prev) {
+          resolved.push({ clusterId: p.prev.id, members: p.members, hash: p.hash, existing: p.prev });
+          continue;
+        }
+        if (p.prev) {
+          await tx.semanticCluster.updateMany({
+            where: { id: p.prev.id, ownerId },
+            data: { name: p.title!.name, summary: p.title!.summary },
+          });
+          resolved.push({ clusterId: p.prev.id, members: p.members, hash: p.hash, existing: p.prev });
+        } else {
+          const created = await tx.semanticCluster.create({
+            data: {
+              ownerId,
+              name: p.title!.name,
+              summary: p.title!.summary,
+              membersHash: p.hash,
+              size: p.members.length,
+            },
+            select: { id: true },
+          });
+          resolved.push({ clusterId: created.id, members: p.members, hash: p.hash, existing: null });
+        }
+      }
 
-  // 5. Indicadores por tema.
-  const stats: ClusterStats[] = [];
-  for (const r of resolved) {
-    stats.push(await clusterStats(r.clusterId, r.members, itemById, edges, clusterOfItem, vitality, now));
-  }
+      // 2. Vitalidad por señal (puro, sin base).
+      const clusterOfItem = new Map<string, string>();
+      for (const r of resolved) for (const id of r.members) clusterOfItem.set(id, r.clusterId);
+      const vitality = computeVitality(items, edges, clusterOfItem, now);
 
-  // 6. Horizonte sugerido (sobre los temas vivos de esta corrida).
-  const suggested = suggestHorizons(stats.filter((s) => s.vitality >= DEAD_THRESHOLD));
+      // 3. Indicadores por tema (density/novelty salen de pgvector, acotados al tenant).
+      const stats: ClusterStats[] = [];
+      for (const r of resolved) {
+        stats.push(
+          await clusterStats(tx, ownerId, r.clusterId, r.members, itemById, edges, clusterOfItem, vitality, now),
+        );
+      }
 
-  // 7. Escribir temas (detectados y no detectados), señales y snapshot.
-  const resolvedIds = new Set(resolved.map((r) => r.clusterId));
-  const orphanIds = items.filter((i) => !clusterOfItem.has(i.id)).map((i) => i.id);
-  const clusterUpdates: { id: string; data: Parameters<typeof prisma.semanticCluster.update>[0]["data"] }[] = [];
-  const snapshotClusters: {
-    clusterId: string;
-    name: string;
-    size: number;
-    status: string;
-    vitality: number;
-    velocity30d: number;
-    density: number | null;
-    connectivity: number | null;
-    novelty: number | null;
-    horizon: string | null;
-    horizonSuggested: string | null;
-  }[] = [];
-  let alive = 0;
-  let dead = 0;
-  let revived = 0;
-  let died = 0;
+      // 4. Horizonte sugerido sobre los temas VIVOS DE ESTE TENANT.
+      const suggested = suggestHorizons(stats.filter((s) => s.vitality >= DEAD_THRESHOLD));
 
-  for (const r of resolved) {
-    const s = stats.find((x) => x.id === r.clusterId)!;
-    const prev = r.existing;
-    const isAlive = s.vitality >= DEAD_THRESHOLD;
-    const wasAlive = prev ? prev.status === "alive" : true;
-    const horizonSuggested = isAlive ? (suggested.get(r.clusterId) ?? null) : null;
-    const horizon = prev && prev.horizonSource === "manual" ? prev.horizon : horizonSuggested;
-    if (isAlive) alive += 1;
-    else dead += 1;
-    if (prev && !wasAlive && isAlive) revived += 1;
-    if (prev && wasAlive && !isAlive) died += 1;
+      // 5. Armar updates y filas de snapshot.
+      const resolvedIds = new Set(resolved.map((r) => r.clusterId));
+      const orphanIds = items.filter((i) => !clusterOfItem.has(i.id)).map((i) => i.id);
+      const clusterUpdates: { id: string; data: Record<string, unknown> }[] = [];
+      const snapshotClusters: {
+        clusterId: string;
+        name: string;
+        size: number;
+        status: string;
+        vitality: number;
+        velocity30d: number;
+        density: number | null;
+        connectivity: number | null;
+        novelty: number | null;
+        horizon: string | null;
+        horizonSuggested: string | null;
+      }[] = [];
+      let alive = 0;
+      let dead = 0;
+      let revived = 0;
+      let died = 0;
 
-    clusterUpdates.push({
-        id: r.clusterId,
-        data: {
-          membersHash: r.hash,
+      for (const r of resolved) {
+        const s = stats.find((x) => x.id === r.clusterId)!;
+        const prev = r.existing;
+        const isAlive = s.vitality >= DEAD_THRESHOLD;
+        const wasAlive = prev ? prev.status === "alive" : true;
+        const horizonSuggested = isAlive ? (suggested.get(r.clusterId) ?? null) : null;
+        const horizon = prev && prev.horizonSource === "manual" ? prev.horizon : horizonSuggested;
+        if (isAlive) alive += 1;
+        else dead += 1;
+        if (prev && !wasAlive && isAlive) revived += 1;
+        if (prev && wasAlive && !isAlive) died += 1;
+
+        clusterUpdates.push({
+          id: r.clusterId,
+          data: {
+            membersHash: r.hash,
+            size: s.size,
+            lastMemberIds: [...r.members].sort(),
+            status: isAlive ? "alive" : "dead",
+            vitality: s.vitality,
+            lastSignalAt: s.lastSignalAt,
+            diedAt: isAlive ? null : wasAlive || !prev ? now : undefined,
+            revivedCount: prev && !wasAlive && isAlive ? prev.revivedCount + 1 : undefined,
+            horizon,
+            horizonSuggested,
+            velocity30d: s.velocity30d,
+            velocityPrev30d: s.velocityPrev30d,
+            density: s.density,
+            connectivity: s.connectivity,
+            novelty: s.novelty,
+            bridgeClusters: s.bridgeClusters,
+          },
+        });
+        snapshotClusters.push({
+          clusterId: r.clusterId,
+          name: prev && prev.membersHash === r.hash ? prev.name : "",
           size: s.size,
-          lastMemberIds: [...r.members].sort(),
           status: isAlive ? "alive" : "dead",
           vitality: s.vitality,
-          lastSignalAt: s.lastSignalAt,
-          diedAt: isAlive ? null : wasAlive || !prev ? now : undefined,
-          revivedCount: prev && !wasAlive && isAlive ? prev.revivedCount + 1 : undefined,
-          horizon,
-          horizonSuggested,
           velocity30d: s.velocity30d,
-          velocityPrev30d: s.velocityPrev30d,
           density: s.density,
           connectivity: s.connectivity,
           novelty: s.novelty,
-          bridgeClusters: s.bridgeClusters,
+          horizon,
+          horizonSuggested,
+        });
+      }
+
+      // Linajes que no aparecieron esta corrida: fosiles. Conservan su ultima
+      // membresia y su vitalidad sigue decayendo con la de esas señales.
+      for (const prev of existing) {
+        if (resolvedIds.has(prev.id)) continue;
+        const fossilVitality = prev.lastMemberIds.reduce((sum, id) => sum + (vitality.get(id) ?? 0), 0);
+        const wasAlive = prev.status === "alive";
+        if (wasAlive) died += 1;
+        dead += 1;
+        clusterUpdates.push({
+          id: prev.id,
+          data: {
+            status: "dead",
+            vitality: fossilVitality,
+            diedAt: wasAlive ? now : undefined,
+            horizonSuggested: null,
+            horizon: prev.horizonSource === "manual" ? prev.horizon : null,
+          },
+        });
+        snapshotClusters.push({
+          clusterId: prev.id,
+          name: prev.name,
+          size: 0,
+          status: "dead",
+          vitality: fossilVitality,
+          velocity30d: 0,
+          density: null,
+          connectivity: null,
+          novelty: null,
+          horizon: prev.horizonSource === "manual" ? prev.horizon : null,
+          horizonSuggested: null,
+        });
+      }
+
+      // 6. Escribir membresías, vitalidad, temas y snapshot.
+      await tx.likedItem.updateMany({
+        data: { clusterId: null },
+        where: { ownerId, clusterId: { not: null } },
+      });
+      for (const r of resolved) {
+        await tx.likedItem.updateMany({
+          data: { clusterId: r.clusterId },
+          where: { ownerId, id: { in: r.members } },
+        });
+      }
+
+      // Vitalidad de todas las señales del grafo en un solo UPDATE.
+      const vitIds = items.map((i) => i.id);
+      const vitVals = vitIds.map((id) => vitality.get(id) ?? 0);
+      if (vitIds.length > 0) {
+        await tx.$executeRaw`
+          UPDATE liked_items AS i
+          SET vitality = v.vit, vitality_at = ${now}
+          FROM unnest(${vitIds}::text[], ${vitVals}::float8[]) AS v(id, vit)
+          WHERE i.id = v.id AND i.owner_id = ${ownerId}`;
+      }
+
+      for (const u of clusterUpdates) {
+        await tx.semanticCluster.updateMany({
+          where: { id: u.id, ownerId },
+          data: u.data as Parameters<typeof tx.semanticCluster.updateMany>[0]["data"],
+        });
+      }
+
+      const snap = await tx.graphSnapshot.create({
+        data: {
+          ownerId,
+          takenAt: now,
+          trigger,
+          nodes: items.length,
+          links: read.links,
+          clustersAlive: alive,
+          clustersDead: dead,
+          orphans: orphanIds.length,
         },
-    });
-    snapshotClusters.push({
-      clusterId: r.clusterId,
-      name: prev && prev.membersHash === r.hash ? prev.name : "",
-      size: s.size,
-      status: isAlive ? "alive" : "dead",
-      vitality: s.vitality,
-      velocity30d: s.velocity30d,
-      density: s.density,
-      connectivity: s.connectivity,
-      novelty: s.novelty,
-      horizon,
-      horizonSuggested,
-    });
-  }
+        select: { id: true },
+      });
 
-  // Linajes que no aparecieron esta corrida: fosiles. Conservan su ultima
-  // membresia y su vitalidad sigue decayendo con la de esas señales.
-  for (const prev of existing) {
-    if (resolvedIds.has(prev.id)) continue;
-    const fossilVitality = prev.lastMemberIds.reduce((sum, id) => sum + (vitality.get(id) ?? 0), 0);
-    const wasAlive = prev.status === "alive";
-    if (wasAlive) died += 1;
-    dead += 1;
-    clusterUpdates.push({
-      id: prev.id,
-      data: {
-        status: "dead",
-        vitality: fossilVitality,
-        diedAt: wasAlive ? now : undefined,
-        horizonSuggested: null,
-        horizon: prev.horizonSource === "manual" ? prev.horizon : null,
-      },
-    });
-    snapshotClusters.push({
-      clusterId: prev.id,
-      name: prev.name,
-      size: 0,
-      status: "dead",
-      vitality: fossilVitality,
-      velocity30d: 0,
-      density: null,
-      connectivity: null,
-      novelty: null,
-      horizon: prev.horizonSource === "manual" ? prev.horizon : null,
-      horizonSuggested: null,
-    });
-  }
+      // El nombre vacio marca "tomalo del tema" (se acaba de bautizar en esta corrida).
+      const names = new Map(
+        (await tx.semanticCluster.findMany({ where: { ownerId }, select: { id: true, name: true } })).map(
+          (c) => [c.id, c.name] as const,
+        ),
+      );
+      await tx.graphSnapshotCluster.createMany({
+        data: snapshotClusters.map((c) => ({
+          ...c,
+          ownerId,
+          snapshotId: snap.id,
+          name: c.name || (names.get(c.clusterId) ?? ""),
+        })),
+      });
+      await tx.graphSnapshotMember.createMany({
+        data: items.map((i) => ({
+          ownerId,
+          snapshotId: snap.id,
+          itemId: i.id,
+          clusterId: clusterOfItem.get(i.id) ?? null,
+          vitality: vitality.get(i.id) ?? 0,
+        })),
+      });
 
-  const vitIds = items.map((i) => i.id);
-  const vitVals = vitIds.map((id) => vitality.get(id) ?? 0);
+      // El grafo de este tenant ya está al día: se apaga la marca de sucio que
+      // pusieron el job de embeddings o el PATCH de publicar (PLAN §3.10).
+      await tx.userQuota.updateMany({ where: { userId: ownerId }, data: { graphDirtyAt: null } });
 
-  const snapshot = await prisma.$transaction(async (tx) => {
-    await tx.likedItem.updateMany({ data: { clusterId: null }, where: { clusterId: { not: null } } });
-    for (const r of resolved) {
-      await tx.likedItem.updateMany({ data: { clusterId: r.clusterId }, where: { id: { in: r.members } } });
-    }
-    // Vitalidad de todas las señales del grafo en un solo UPDATE.
-    await tx.$executeRaw`
-      UPDATE liked_items AS i
-      SET vitality = v.vit, vitality_at = ${now}
-      FROM unnest(${vitIds}::text[], ${vitVals}::float8[]) AS v(id, vit)
-      WHERE i.id = v.id`;
-    for (const u of clusterUpdates) await tx.semanticCluster.update({ where: { id: u.id }, data: u.data });
-
-    const snap = await tx.graphSnapshot.create({
-      data: {
-        ownerId,
-        takenAt: now,
-        trigger,
-        nodes: items.length,
-        links,
-        clustersAlive: alive,
-        clustersDead: dead,
+      return {
+        snapshotId: snap.id,
+        clusters: resolved.length,
+        alive,
+        dead,
+        died,
+        revived,
         orphans: orphanIds.length,
-      },
-    });
-    // El nombre vacio marca "tomalo del tema" (se acaba de bautizar en esta corrida).
-    const names = new Map(
-      (await tx.semanticCluster.findMany({ select: { id: true, name: true } })).map((c) => [c.id, c.name]),
-    );
-    await tx.graphSnapshotCluster.createMany({
-      data: snapshotClusters.map((c) => ({
-        ...c,
-        ownerId,
-        snapshotId: snap.id,
-        name: c.name || (names.get(c.clusterId) ?? ""),
-      })),
-    });
-    await tx.graphSnapshotMember.createMany({
-      data: items.map((i) => ({
-        ownerId,
-        snapshotId: snap.id,
-        itemId: i.id,
-        clusterId: clusterOfItem.get(i.id) ?? null,
-        vitality: vitality.get(i.id) ?? 0,
-      })),
-    });
-    return snap;
-  }, { timeout: 120_000, maxWait: 10_000 });
+      };
+    },
+    { timeoutMs: TX_TIMEOUT_MS },
+  );
 
   return {
     ok: errors.length === 0,
     trigger,
-    snapshotId: snapshot.id,
+    snapshotId: written.snapshotId,
     nodes: items.length,
-    links,
-    clusters: resolved.length,
+    links: read.links,
+    clusters: written.clusters,
     named,
     reused,
-    alive,
-    dead,
-    died,
-    revived,
-    orphans: orphanIds.length,
+    alive: written.alive,
+    dead: written.dead,
+    died: written.died,
+    revived: written.revived,
+    orphans: written.orphans,
     ...(errors.length > 0 ? { clusterErrors: errors.slice(0, 3) } : {}),
   };
 }
 
-/** Rehace semantic_links: por cada señal publicada con embedding, sus LINK_TOP_K
- *  vecinas mas cercanas por coseno, cortadas en LINK_THRESHOLD. El par va
- *  ordenado (LEAST/GREATEST) y el GROUP BY deduplica A→B y B→A. Completo, no por
- *  item: con cientos de señales el pairwise en Postgres es instantaneo y evita el
- *  bug sutil de borrar por item los enlaces que otro item habia creado. */
-export async function recomputeLinks(): Promise<number> {
-  const [, inserted] = await prisma.$transaction([
-    prisma.$executeRaw`DELETE FROM semantic_links`,
-    prisma.$executeRaw`
-      INSERT INTO semantic_links (id, item_a_id, item_b_id, score)
-      SELECT gen_random_uuid()::text, pair.a, pair.b, MAX(pair.score)
-      FROM (
-        SELECT LEAST(src.id, n.id) AS a, GREATEST(src.id, n.id) AS b, n.score
-        FROM liked_items src
-        CROSS JOIN LATERAL (
-          SELECT other.id, 1 - (other.embedding <=> src.embedding) AS score
-          FROM liked_items other
-          WHERE other.id <> src.id
-            AND other.embedding IS NOT NULL
-            AND other.publish_status = 'published'
-          ORDER BY other.embedding <=> src.embedding
-          LIMIT ${LINK_TOP_K}
-        ) n
-        WHERE src.embedding IS NOT NULL
-          AND src.publish_status = 'published'
-          AND n.score >= ${LINK_THRESHOLD}
-      ) pair
-      GROUP BY pair.a, pair.b`,
-  ]);
-  return inserted;
+/**
+ * Rehace `semantic_links` DEL TENANT: por cada señal publicada con embedding, sus
+ * LINK_TOP_K vecinas mas cercanas por coseno, cortadas en LINK_THRESHOLD. El par
+ * va ordenado (LEAST/GREATEST) y el GROUP BY deduplica A→B y B→A. Completo y no
+ * por item: con cientos de señales el pairwise en Postgres es instantaneo y evita
+ * el bug sutil de borrar por item los enlaces que otro item habia creado.
+ *
+ * Los DOS lados del LATERAL filtran `owner_id`: sin eso, el vecino más cercano de
+ * una señal de A podría ser una señal de B (RLS lo taparía, pero el plan de
+ * ejecución y el resultado dependerían de una barrera que este SQL no debería
+ * necesitar). Es interna a propósito — solo `refreshGraph` la llama, y siempre
+ * dentro de `withOwner`.
+ */
+async function recomputeLinks(tx: TenantTx, ownerId: string): Promise<number> {
+  await tx.$executeRaw`DELETE FROM semantic_links WHERE owner_id = ${ownerId}`;
+  return tx.$executeRaw`
+    INSERT INTO semantic_links (id, owner_id, item_a_id, item_b_id, score)
+    SELECT gen_random_uuid()::text, ${ownerId}, pair.a, pair.b, MAX(pair.score)
+    FROM (
+      SELECT LEAST(src.id, n.id) AS a, GREATEST(src.id, n.id) AS b, n.score
+      FROM liked_items src
+      CROSS JOIN LATERAL (
+        SELECT other.id, 1 - (other.embedding <=> src.embedding) AS score
+        FROM liked_items other
+        WHERE other.owner_id = ${ownerId}
+          AND other.id <> src.id
+          AND other.embedding IS NOT NULL
+          AND other.publish_status = 'published'
+        ORDER BY other.embedding <=> src.embedding
+        LIMIT ${LINK_TOP_K}
+      ) n
+      WHERE src.owner_id = ${ownerId}
+        AND src.embedding IS NOT NULL
+        AND src.publish_status = 'published'
+        AND n.score >= ${LINK_THRESHOLD}
+    ) pair
+    GROUP BY pair.a, pair.b`;
 }
 
 /**
@@ -449,6 +642,8 @@ export function computeVitality(
 }
 
 async function clusterStats(
+  tx: TenantTx,
+  ownerId: string,
   clusterId: string,
   members: string[],
   itemById: Map<string, Item>,
@@ -489,16 +684,23 @@ async function clusterStats(
   }
 
   // Cohesion y novedad con pgvector: media de similitud de los miembros a su
-  // centroide, y distancia del centroide del tema al centroide de todo el grafo.
-  const rows = await prisma.$queryRaw<{ density: number | null; novelty: number | null }[]>`
+  // centroide, y distancia del centroide del tema al centroide de TODO EL GRAFO
+  // DEL TENANT (el "centroide global" de antes era el de la tabla entera, o sea
+  // el de todos los usuarios juntos — el bug que arregla la tarea 3.9).
+  const rows = await tx.$queryRaw<{ density: number | null; novelty: number | null }[]>`
     WITH c AS (
-      SELECT avg(embedding) AS centroid FROM liked_items WHERE id = ANY(${members}::text[])
+      SELECT avg(embedding) AS centroid FROM liked_items
+      WHERE owner_id = ${ownerId} AND id = ANY(${members}::text[])
     ), g AS (
       SELECT avg(embedding) AS centroid FROM liked_items
-      WHERE publish_status = 'published' AND embedding IS NOT NULL
+      WHERE owner_id = ${ownerId} AND publish_status = 'published' AND embedding IS NOT NULL
     )
     SELECT
-      (SELECT avg(1 - (i.embedding <=> c.centroid)) FROM liked_items i, c WHERE i.id = ANY(${members}::text[])) AS density,
+      (
+        SELECT avg(1 - (i.embedding <=> c.centroid))
+        FROM liked_items i, c
+        WHERE i.owner_id = ${ownerId} AND i.id = ANY(${members}::text[])
+      ) AS density,
       (SELECT c.centroid <=> g.centroid FROM c, g) AS novelty`;
   const row = rows[0] ?? { density: null, novelty: null };
 
@@ -519,16 +721,20 @@ async function clusterStats(
 
 /**
  * Heuristica v1 (PLANS/TOOLS4FORESIGHT_HORIZONTES_PLAN.md). Se sugiere a nivel
- * tema; Frida confirma o corrige desde la pestaña Horizontes.
+ * tema; el usuario confirma o corrige desde la pestaña Horizontes. Los cuantiles
+ * salen de los temas vivos que se le pasan, que siempre son los de UN tenant.
  *   H1 ya esta pasando: grande, vivo y cerca del centro del grafo.
  *   H3 señal debil: chico, con poca vitalidad o lejos del resto.
  *   H2 transicion: lo demas.
  */
-export function suggestHorizons(alive: ClusterStats[]): Map<string, Horizon> {
-  const novelties = alive.map((s) => s.novelty).filter((n): n is number => n !== null).sort((a, b) => a - b);
+export function suggestHorizons(alive: ClusterStats[]): Map<string, HorizonKey> {
+  const novelties = alive
+    .map((s) => s.novelty)
+    .filter((n): n is number => n !== null)
+    .sort((a, b) => a - b);
   const median = quantile(novelties, 0.5);
   const p75 = quantile(novelties, 0.75);
-  const result = new Map<string, Horizon>();
+  const result = new Map<string, HorizonKey>();
   for (const s of alive) {
     const nov = s.novelty ?? median ?? 0;
     if (s.size < 5 || s.vitality < 1.5 || (p75 !== null && nov > p75)) {
