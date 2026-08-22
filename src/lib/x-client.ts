@@ -4,11 +4,16 @@ import { refreshAccessToken } from "@/lib/x-oauth";
 
 const REFRESH_MARGIN_MS = 60_000; // refrescar si expira en menos de 1 min
 
-// App de un solo usuario (Frida): siempre hay a lo mas una fila en x_auth_tokens.
-export async function getValidAccessToken(): Promise<{ xUserId: string; accessToken: string }> {
-  const tokenRow = await prisma.xAuthToken.findFirst();
+// Un token por usuario: x_auth_tokens tiene user_id unico. El userId es obligatorio
+// a proposito — no existe "la" cuenta de X de la app, existe la de cada tenant.
+// TODO(fase2.2): refresh con lock optimista (chequeo de updatedAt) para que dos
+// jobs concurrentes del mismo tenant no quemen el refresh_token dos veces.
+export async function getValidAccessToken(
+  userId: string,
+): Promise<{ xUserId: string; accessToken: string }> {
+  const tokenRow = await prisma.xAuthToken.findUnique({ where: { userId } });
   if (!tokenRow) {
-    throw new Error("No hay ninguna cuenta de X conectada. Corre /api/auth/x/login primero.");
+    throw new Error("No hay ninguna cuenta de X conectada. Conecta tu cuenta en /conexion.");
   }
 
   if (tokenRow.expiresAt.getTime() - REFRESH_MARGIN_MS > Date.now()) {
@@ -20,7 +25,7 @@ export async function getValidAccessToken(): Promise<{ xUserId: string; accessTo
   const expiresAt = new Date(Date.now() + refreshed.expires_in * 1000);
 
   await prisma.xAuthToken.update({
-    where: { xUserId: tokenRow.xUserId },
+    where: { userId },
     data: {
       accessToken: encryptToken(refreshed.access_token),
       refreshToken: encryptToken(refreshed.refresh_token ?? refreshToken),

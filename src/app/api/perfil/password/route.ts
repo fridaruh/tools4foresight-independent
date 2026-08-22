@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser } from "@/lib/require-admin";
+import { getSessionUser } from "@/lib/require-user";
 
 const MIN_PASSWORD_LENGTH = 8; // mismo mínimo que el signup (src/lib/auth.ts)
 
@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
   const requestHeaders = await headers();
   const credential = await prisma.account.findFirst({
-    where: { userId: user.id, providerId: "credential" },
+    where: { userId: user.userId, providerId: "credential" },
     select: { id: true },
   });
 

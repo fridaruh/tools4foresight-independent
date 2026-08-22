@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CATEGORY_NAMES } from "@/config/categories";
-import { getEffectiveRole, requireSessionApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
 
 export type CategoryOption = { name: string; count: number };
 
@@ -9,21 +9,21 @@ export type CategoryOption = { name: string; count: number };
 // el modelo puede haber propuesto categorias nuevas (PLAN 3.1) y esas tambien
 // tienen que poderse filtrar.
 //
-// Para un member los conteos se calculan solo sobre lo publicado: son los que
-// muestra su vista de Señales, y los totales del catalogo crudo son dato
-// interno. Publicar exige categoria (src/lib/publish.ts), asi que para member
-// `uncategorized` es siempre 0 y el filtro "Sin categorizar" no aparece.
+// Los conteos son siempre del catalogo del usuario de la sesion. `scope=published`
+// los recorta a lo publicado, como filtro de UI (ya no como regla de acceso).
+// TODO(fase4): el orden de las opciones debe salir de la tabla `categories` del
+// tenant, no de CATEGORY_NAMES (la plantilla generica).
 export async function GET(request: NextRequest) {
-  const denied = await requireSessionApi();
-  if (denied) return denied;
-  const role = await getEffectiveRole();
-  // scope=published lo manda el board de /senales tambien para admins, para que
-  // los conteos empaten con lo que esa vista realmente lista.
-  const publishedOnly =
-    role !== "admin" || request.nextUrl.searchParams.get("scope") === "published";
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
+
+  const publishedOnly = request.nextUrl.searchParams.get("scope") === "published";
   const grouped = await prisma.likedItem.groupBy({
     by: ["category"],
-    where: publishedOnly ? { publishStatus: "published" } : undefined,
+    where: {
+      ownerId: user.userId,
+      ...(publishedOnly ? { publishStatus: "published" } : {}),
+    },
     _count: { _all: true },
   });
 

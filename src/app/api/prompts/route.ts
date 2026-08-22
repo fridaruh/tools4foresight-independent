@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAdminApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
 import { getPromptOverrides, isPromptKey, PROMPT_DEFAULTS } from "@/lib/analysis-prompts";
 
 // System prompts del análisis, editables desde la pantalla de Sistema. La tabla solo
 // guarda overrides: PUT con texto vacío borra la fila y regresa al default del código.
 
 export async function GET() {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const overrides = await getPromptOverrides();
   return NextResponse.json({
@@ -21,8 +21,8 @@ export async function GET() {
 }
 
 export async function PUT(request: NextRequest) {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const { key, value } = (await request.json()) as { key?: unknown; value?: unknown };
 
@@ -34,14 +34,14 @@ export async function PUT(request: NextRequest) {
   }
 
   if (value.trim() === "") {
-    await prisma.promptSetting.deleteMany({ where: { key } });
+    await prisma.promptSetting.deleteMany({ where: { ownerId: user.userId, key } });
     return NextResponse.json({ ok: true, value: null });
   }
 
   await prisma.promptSetting.upsert({
-    where: { key },
+    where: { ownerId_key: { ownerId: user.userId, key } },
     update: { value },
-    create: { key, value },
+    create: { ownerId: user.userId, key, value },
   });
   return NextResponse.json({ ok: true, value });
 }

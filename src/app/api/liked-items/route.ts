@@ -3,27 +3,27 @@ import { prisma } from "@/lib/prisma";
 import { buildWhere, filtersFromSearchParams } from "@/lib/liked-items-query";
 import { toBoardItem } from "@/lib/board-item";
 import { InvalidLinkError, manualItemInput, normalizeLinkUrl } from "@/lib/manual-link";
-import { getEffectiveRole, requireSessionApi, requireAdminApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
 
 const DEFAULT_LIMIT = 60;
 
 export async function GET(request: NextRequest) {
-  const denied = await requireSessionApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const searchParams = request.nextUrl.searchParams;
   const filters = filtersFromSearchParams(searchParams);
   const limit = Math.min(Number(searchParams.get("limit")) || DEFAULT_LIMIT, 100);
   const offset = Math.max(Number(searchParams.get("offset")) || 0, 0);
 
-  // El proxy solo valida que haya sesion; el alcance va por rol. Un member ve
-  // unicamente lo publicado — sin esto, cualquier cuenta (y con signup abierto,
-  // cualquiera) podria jalar el catalogo crudo completo por la API. scope=published
-  // lo manda ademas el board de /senales para que un admin parado ahi vea lo
-  // mismo que ve un member.
-  const role = await getEffectiveRole();
+  // Ya no hay recorte por rol: cada usuario es dueño de su banco y lo ve completo.
+  // El alcance lo pone el ownerId. `scope=published` sigue existiendo como filtro
+  // opcional de la UI, no como regla de seguridad.
+  // TODO(fase4): pasar esta lectura por tenantClient(user.userId) en vez de filtrar
+  // a mano aqui.
   const where = buildWhere(filters);
-  if (role !== "admin" || searchParams.get("scope") === "published") {
+  where.ownerId = user.userId;
+  if (searchParams.get("scope") === "published") {
     where.publishStatus = "published";
   }
 
@@ -55,8 +55,8 @@ export async function GET(request: NextRequest) {
  * porque juntos tardan mas de lo que un formulario debe quedarse esperando.
  */
 export async function POST(request: NextRequest) {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const { url: rawUrl } = (await request.json()) as { url?: string };
 
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
   // `contentUrl`, y uno agregado a mano en las dos. Agregarlo otra vez duplicaria la
   // fila en el catalogo sin que nada mas lo impida (el unique es sobre `tweetId`).
   const existing = await prisma.likedItem.findFirst({
-    where: { OR: [{ contentUrl: url }, { tweetUrl: url }] },
+    where: { ownerId: user.userId, OR: [{ contentUrl: url }, { tweetUrl: url }] },
     include: { customFields: true },
   });
   if (existing) {
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
   }
 
   const item = await prisma.likedItem.create({
-    data: manualItemInput(url),
+    data: manualItemInput(url, user.userId),
     include: { customFields: true },
   });
 

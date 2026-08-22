@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { RegisterForm } from "@/components/PasswordAuthForms";
-import { getEffectiveRole } from "@/lib/require-admin";
+import { getEffectiveRole } from "@/lib/require-user";
 
 export const metadata = { robots: { index: false, follow: false } };
 
@@ -21,7 +21,7 @@ export default async function RegistroPage({
   const loginHref = from && from.startsWith("/") ? `/login?from=${encodeURIComponent(from)}` : "/login";
 
   const role = await getEffectiveRole();
-  if (role !== null) redirect(role === "admin" ? "/" : "/categorias");
+  if (role !== null) redirect("/");
 
   return (
     <div

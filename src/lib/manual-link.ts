@@ -54,17 +54,21 @@ function hostHandle(url: string): string {
   return new URL(url).hostname.replace(/^www\./, "");
 }
 
-export function manualItemInput(url: string): Prisma.LikedItemCreateInput {
+export function manualItemInput(
+  url: string,
+  ownerId: string,
+): Prisma.LikedItemUncheckedCreateInput {
   return {
+    ownerId,
     source: MANUAL_SOURCE,
     tweetId: `manual:${randomUUID()}`,
     authorHandle: hostHandle(url),
     authorName: null,
     tweetText: url,
     tweetUrl: url,
-    // A diferencia de un like de X, aqui la fecha no se estima: es cuando Frida lo
-    // agrego. Se marca con su propia fuente para que el tooltip no prometa una
-    // estimacion que no aplica.
+    // A diferencia de un like de X, aqui la fecha no se estima: es cuando el
+    // usuario lo agrego. Se marca con su propia fuente para que el tooltip no
+    // prometa una estimacion que no aplica.
     likedAt: new Date(),
     likedAtSource: MANUAL_LIKED_AT_SOURCE,
     detectedAt: new Date(),

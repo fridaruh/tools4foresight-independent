@@ -5,6 +5,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { magicLinkEmail } from "@/lib/magic-link-email";
+import { seedTenant } from "@/lib/seed-tenant";
 import { emailFrom } from "@/lib/email-from";
 
 // Instanciar Resend solo al mandar el email, no al cargar el modulo: este archivo
@@ -15,9 +16,10 @@ function getResend(): Resend {
   return new Resend(process.env.RESEND_API_KEY);
 }
 
-// Signup abierto: verificar el magic link de un email desconocido crea la
-// cuenta con role "member" (defaultValue del additionalField; `input: false`
-// impide que el cliente mande role, asi que nadie se auto-asigna admin).
+// Signup abierto: verificar el magic link (o registrarse con contraseña) de un
+// email desconocido crea la cuenta con role "user" — dueño de su propio banco de
+// señales. `input: false` impide que el cliente mande `role`, así que nadie se
+// auto-asigna "platform_admin".
 const MAGIC_LINK_EXPIRY_MINUTES = 10;
 
 export const auth = betterAuth({
@@ -40,8 +42,25 @@ export const auth = betterAuth({
       role: {
         type: "string",
         required: true,
-        defaultValue: "member",
+        defaultValue: "user",
         input: false,
+      },
+    },
+  },
+  databaseHooks: {
+    user: {
+      create: {
+        // Cada usuario es un tenant: en cuanto existe la fila en `users` le
+        // sembramos su cuota y su catálogo de categorías. Si el seed falla, el
+        // registro NO se cae: la cuenta ya está creada y el seed es idempotente,
+        // así que se puede reintentar; tumbar el signup por esto sería peor.
+        after: async (user) => {
+          try {
+            await seedTenant(user.id);
+          } catch (error) {
+            console.error("[seed-tenant] falló al sembrar el tenant", user.id, error);
+          }
+        },
       },
     },
   },

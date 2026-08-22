@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export default async function GrafoPage() {
   const role = await getEffectiveRole();
   if (role === null) redirect("/login?from=%2Fgrafo");
-  const isAdmin = role === "admin";
+  // Cada usuario es dueño de su grafo: si hay sesion, puede editar sus temas.
+  const isAdmin = true;
 
   const [items, links, clusters, unembedded] = await Promise.all([
     // Solo publicadas (decision de Frida, 2026-08-19): el grafo es sobre la vista

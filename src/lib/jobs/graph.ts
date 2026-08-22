@@ -74,7 +74,12 @@ type ClusterStats = {
  * despublica una señal. Es idempotente: correrlo dos veces seguidas produce dos
  * snapshots iguales salvo la fecha.
  */
-export async function refreshGraph(trigger: GraphTrigger) {
+// TODO(fase3.9): parametrizar CADA query de este archivo con owner_id (incluidos
+// los $queryRaw de recomputeLinks y de los cuantiles de horizonte) y envolver todo
+// en withOwner(ownerId, ...). Hoy `ownerId` solo se usa para ESCRIBIR con dueño;
+// la lectura la acota RLS, que sin contexto devuelve cero filas — o sea, el job
+// falla en vacio en vez de cruzar tenants, pero todavia no hace su trabajo.
+export async function refreshGraph(ownerId: string, trigger: GraphTrigger) {
   const now = new Date();
   const links = await recomputeLinks();
 
@@ -156,7 +161,13 @@ export async function refreshGraph(trigger: GraphTrigger) {
       resolved.push({ clusterId: prev.id, members, hash, existing: prev });
     } else {
       const created = await prisma.semanticCluster.create({
-        data: { name: title.name, summary: title.summary, membersHash: hash, size: members.length },
+        data: {
+          ownerId,
+          name: title.name,
+          summary: title.summary,
+          membersHash: hash,
+          size: members.length,
+        },
       });
       resolved.push({ clusterId: created.id, members, hash, existing: null });
     }
@@ -297,6 +308,7 @@ export async function refreshGraph(trigger: GraphTrigger) {
 
     const snap = await tx.graphSnapshot.create({
       data: {
+        ownerId,
         takenAt: now,
         trigger,
         nodes: items.length,
@@ -313,12 +325,14 @@ export async function refreshGraph(trigger: GraphTrigger) {
     await tx.graphSnapshotCluster.createMany({
       data: snapshotClusters.map((c) => ({
         ...c,
+        ownerId,
         snapshotId: snap.id,
         name: c.name || (names.get(c.clusterId) ?? ""),
       })),
     });
     await tx.graphSnapshotMember.createMany({
       data: items.map((i) => ({
+        ownerId,
         snapshotId: snap.id,
         itemId: i.id,
         clusterId: clusterOfItem.get(i.id) ?? null,

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import { TopNav } from "@/components/TopNav";
-import { getEffectiveRole, getSessionUser } from "@/lib/require-admin";
+import { getEffectiveRole, getSessionUser } from "@/lib/require-user";
 
 // Las tres voces del sistema (DESIGN.md §5). Una sola familia por funcion en toda la
 // app: la variedad tipografica por pantalla que habia antes contradice el "sistematico

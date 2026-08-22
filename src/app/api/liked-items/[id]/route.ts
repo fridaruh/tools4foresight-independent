@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { normalizePestel } from "@/config/pestel";
-import { requireAdminApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
 import { isPublishable, isPublishStatus } from "@/lib/publish";
 import { refreshGraph } from "@/lib/jobs/graph";
 
@@ -24,8 +24,8 @@ type Body = {
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const { id } = await params;
   const body = (await request.json()) as Body;
@@ -73,8 +73,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (body.publishStatus === "published") {
       // La regla se evalua contra el estado que va a quedar: si esta misma llamada
       // trae category/impact/whyMatters, cuentan; si no, se usa lo que ya hay en la DB.
-      const current = await prisma.likedItem.findUnique({
-        where: { id },
+      const current = await prisma.likedItem.findFirst({
+        where: { id, ownerId: user.userId },
         select: { category: true, impact: true, whyMatters: true },
       });
       if (!current) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
@@ -107,14 +107,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // toda la fila o no queda nada.
   const writes = [];
   if (Object.keys(data).length > 0) {
-    writes.push(prisma.likedItem.update({ where: { id }, data }));
+    // where con ownerId: si el item es de otro tenant el update revienta con
+    // P2025 en vez de tocar la fila (y RLS lo cortaria igual).
+    writes.push(prisma.likedItem.update({ where: { id, ownerId: user.userId }, data }));
   }
   for (const [fieldKey, fieldValue] of customEntries) {
     writes.push(
       prisma.likedItemCustomField.upsert({
         where: { likedItemId_fieldKey: { likedItemId: id, fieldKey } },
         update: { fieldValue },
-        create: { likedItemId: id, fieldKey, fieldValue },
+        create: { ownerId: user.userId, likedItemId: id, fieldKey, fieldValue },
       }),
     );
   }
@@ -128,25 +130,30 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if ("publishStatus" in data) {
     after(async () => {
       try {
-        await refreshGraph("publish");
+        await refreshGraph(user.userId, "publish");
       } catch (error) {
         console.error("[grafo] recalculo tras publicar fallo:", error);
       }
     });
   }
 
-  const item = await prisma.likedItem.findUnique({
-    where: { id },
+  const item = await prisma.likedItem.findFirst({
+    where: { id, ownerId: user.userId },
     include: { customFields: true },
   });
 
   return NextResponse.json({ item });
 }
 
+// El GET tambien lleva guard: sin el, cualquiera con el id de un item lo leia
+// completo (PLAN 3.13).
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
+
   const { id } = await params;
-  const item = await prisma.likedItem.findUnique({
-    where: { id },
+  const item = await prisma.likedItem.findFirst({
+    where: { id, ownerId: user.userId },
     include: { customFields: true },
   });
 

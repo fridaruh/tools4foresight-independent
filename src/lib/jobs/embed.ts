@@ -32,7 +32,9 @@ type Candidate = {
  * no el catalogo crudo. Despublicar una señal la saca del grafo en el siguiente
  * recalculo porque las aristas se rehacen completas desde el filtro published.
  */
-export async function embedPublished(budgetMs: number = TIME_BUDGET_MS) {
+// TODO(fase3.8): leer/escribir dentro de withOwner(ownerId, ...) y cambiar Ollama
+// por OpenAI text-embedding-3-small (1536 dims, que es lo que ya declara el schema).
+export async function embedPublished(ownerId: string, budgetMs: number = TIME_BUDGET_MS) {
   const startedAt = Date.now();
   const { model } = embeddingConfig();
 
@@ -92,7 +94,7 @@ export async function embedPublished(budgetMs: number = TIME_BUDGET_MS) {
   // Vercel y el PATCH de publicar. Aqui se paga solo cuando algo cambio.
   let graph: Awaited<ReturnType<typeof refreshGraph>> | undefined;
   if (errors.length === 0 || embedded > 0) {
-    graph = await refreshGraph("embed");
+    graph = await refreshGraph(ownerId, "embed");
   }
 
   return {

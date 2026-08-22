@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser } from "@/lib/require-admin";
+import { getSessionUser } from "@/lib/require-user";
 
 // Editar nombre y/o email del usuario de la sesión (pantalla /perfil).
 // Pasa por auth.api (better-auth) y no por prisma directo, para que la
@@ -35,14 +35,14 @@ export async function PATCH(request: NextRequest) {
       // link) que esta app no tiene. La sesión activa es la prueba de
       // identidad, igual que en el resto de /perfil.
       const taken = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-      if (taken && taken.id !== user.id) {
+      if (taken && taken.id !== user.userId) {
         return NextResponse.json(
           { ok: false, error: "Ya hay una cuenta con ese email." },
           { status: 400 },
         );
       }
       await prisma.user.update({
-        where: { id: user.id },
+        where: { id: user.userId },
         data: { email, emailVerified: false },
       });
     }

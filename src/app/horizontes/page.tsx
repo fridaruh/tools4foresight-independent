@@ -12,7 +12,8 @@ function historySince(): Date {
 export default async function HorizontesPage() {
   const role = await getEffectiveRole();
   if (role === null) redirect("/login?from=%2Fhorizontes");
-  const canEdit = role === "admin";
+  // Cada usuario edita los horizontes de SU grafo.
+  const canEdit = true;
   const since = historySince();
 
   const [clusters, snapshots, history, orphans, unembedded] = await Promise.all([

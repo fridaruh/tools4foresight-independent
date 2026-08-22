@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { MagicLinkForm } from "@/components/MagicLinkForm";
 import { PasswordLoginForm } from "@/components/PasswordAuthForms";
-import { getEffectiveRole } from "@/lib/require-admin";
+import { getEffectiveRole } from "@/lib/require-user";
 
 const ERROR_LABEL: Record<string, string> = {
   "1": "Password incorrecta.",
@@ -32,7 +32,7 @@ export default async function LoginPage({
   // Con sesion activa no hay nada que pedir aqui: a su vista segun rol. (El proxy
   // no cubre /login, asi que el redirect vive en la propia pagina.)
   const role = await getEffectiveRole();
-  if (role !== null) redirect(role === "admin" ? "/" : "/categorias");
+  if (role !== null) redirect("/");
 
   const magicError = error ? MAGIC_ERROR_LABEL[error] : undefined;
 

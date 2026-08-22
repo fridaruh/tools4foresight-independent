@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser, requireSessionPage } from "@/lib/require-admin";
+import { getSessionUser, requireSessionPage } from "@/lib/require-user";
 import { ProfileForms } from "@/components/ProfileForms";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export default async function PerfilPage() {
   }
 
   const credential = await prisma.account.findFirst({
-    where: { userId: user.id, providerId: "credential" },
+    where: { userId: user.userId, providerId: "credential" },
     select: { id: true },
   });
 

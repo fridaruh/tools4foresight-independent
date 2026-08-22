@@ -3,7 +3,8 @@ import { ingestLikes } from "@/lib/jobs/ingest-likes";
 import { fetchPendingContent } from "@/lib/jobs/fetch-content";
 import { categorizePending } from "@/lib/jobs/categorize";
 import { analyzePending } from "@/lib/jobs/analyze";
-import { requireAdminApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
+import { NextResponse as Res } from "next/server";
 
 export const maxDuration = 300;
 
@@ -14,11 +15,15 @@ const SAFETY_MARGIN_MS = 30_000;
 // de contenido + categorizacion en la misma llamada, para no exponer 3 botones
 // al usuario final.
 export async function POST() {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof Res) return user;
 
   const startedAt = Date.now();
-  const ingestion = await ingestLikes();
+  // TODO(fase3.12): encadenar los cuatro jobs dentro de un solo withOwner y con
+  // cooldown de 30 min por tenant. Hoy solo la ingesta recibe el owner; fetch,
+  // categorize y analyze siguen sin filtrar (Fase 3) — con RLS activo no ven nada,
+  // que es el modo de fallar correcto.
+  const ingestion = await ingestLikes(user.userId);
   const content = await fetchPendingContent();
 
   const budgetLeft = () => 300_000 - (Date.now() - startedAt) - SAFETY_MARGIN_MS;

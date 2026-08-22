@@ -9,7 +9,7 @@ import { UserMenu } from "@/components/UserMenu";
 
 // `section` empata con los bloques [data-section] de globals.css. El numero se
 // muestra junto a la etiqueta: la nav es el indice del documento.
-const ADMIN_SECTIONS = [
+const SECTIONS = [
   { href: "/", label: "Catálogo", index: "01", section: "likes" },
   { href: "/enrich", label: "Análisis", index: "02", section: "enrich" },
   // El grafo entra como 03 y recorre lo que sigue (decision de Frida, 2026-08-19).
@@ -17,29 +17,20 @@ const ADMIN_SECTIONS = [
   { href: "/horizontes", label: "Horizontes", index: "04", section: "horizontes" },
   { href: "/categorias", label: "Taxonomía", index: "05", section: "categorias" },
   { href: "/conexion", label: "Sistema", index: "06", section: "conexion" },
-  { href: "/usuarios", label: "Usuarios", index: "07", section: "usuarios" },
-];
-
-const MEMBER_SECTIONS = [
-  { href: "/categorias", label: "Categorías", index: "01", section: "explora" },
-  { href: "/senales", label: "Señales", index: "02", section: "senales" },
-  // Grafo y Horizontes abiertos a miembros (decision de Frida, 2026-08-20): las
-  // mismas paginas que el admin, sin avisos de jobs y con el horizonte en solo lectura.
-  { href: "/grafo", label: "Grafo", index: "03", section: "grafo" },
-  { href: "/horizontes", label: "Horizontes", index: "04", section: "horizontes-member" },
 ];
 
 export function TopNav({
   role,
   user,
 }: {
-  role: "admin" | "member" | null;
-  /** Usuario de la sesión de better-auth; null con la cookie legacy de Fase 0. */
+  role: "user" | "platform_admin" | null;
+  /** Usuario de la sesión de better-auth. */
   user: { name: string; email: string } | null;
 }) {
   const pathname = usePathname();
   // Sin sesion (p.ej. en /login) no hay nada que navegar todavia: solo el logo.
-  const sections = role === "admin" ? ADMIN_SECTIONS : role === "member" ? MEMBER_SECTIONS : [];
+  // Con sesion, todos ven las mismas secciones: cada quien sobre su propio banco.
+  const sections = role !== null ? SECTIONS : [];
 
   return (
     <header className="sticky top-0 z-30 border-b border-ink bg-canvas/90 backdrop-blur">
@@ -86,8 +77,8 @@ export function TopNav({
 
         {role !== null ? (
           <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-4">
-            {role === "admin" && <SyncButton />}
-            {user ? <UserMenu user={user} showSubscription={role === "member"} /> : <LogoutButton />}
+            <SyncButton />
+            {user ? <UserMenu user={user} /> : <LogoutButton />}
           </div>
         ) : pathname === "/login" ? null : (
           // Puerta de entrada para miembros desde la landing: sin esto el unico

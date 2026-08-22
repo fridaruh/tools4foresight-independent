@@ -1,73 +1,72 @@
-// Catalogo de categorias y ejemplos few-shot.
+// Plantilla de categorías con la que arranca CADA usuario nuevo.
 //
-// Vive aparte del pipeline a proposito (ver PLAN seccion 3.3): las categorias van
-// a cambiar con el uso, y ajustarlas no deberia requerir tocar la logica del job.
-// Editar este archivo es suficiente.
+// Ya no es "el catálogo de la app": desde la Fase 1 el catálogo vive en la tabla
+// `categories`, una copia por tenant, y el usuario lo edita desde /categorias. Este
+// archivo es solo la semilla que src/lib/seed-tenant.ts inserta al crear la cuenta.
 //
-// Ampliado 2026-07-27: con las 4 categorias originales el 55% de los likes caia en
-// "Otros". Las 6 nuevas salieron de analizar una muestra de 150 de esos items, y
-// los ejemplos de abajo son likes reales de Frida, no inventados — un few-shot con
-// su vocabulario clasifica mejor que uno generico.
+// Por eso los ejemplos son genéricos y neutrales: son un few-shot de arranque para
+// alguien que todavía no tiene señales, no los likes de nadie en particular. Cuando
+// el usuario ajuste descripciones y ejemplos a su vocabulario, la clasificación
+// mejora — ese es el punto de que sean editables.
 //
-// Frontera Movies / Personal & Pop-Culture (decidida por Frida el 2026-07-27): el cine
-// y las series queer (lesbico, gay, sapphic) van a Movies aunque el tweet sea una
-// anecdota personal; el resto del comentario personal sobre cine se queda en
-// Personal & Pop-Culture. La regla vive en las dos descripciones a proposito, porque el
-// modelo lee cada categoria por separado y solo respeta el desempate si lo ve en ambas.
+// Fase 3 migrará src/lib/categorize.ts a leer el catálogo del tenant desde la DB;
+// mientras tanto CATEGORY_NAMES / FALLBACK_CATEGORY siguen exportados para que el
+// código que aún no está migrado compile y funcione igual.
 
 export type CategoryDefinition = {
   name: string;
-  /** Que entra aqui. Va literal al prompt, escribirlo para el modelo. */
+  /** Qué entra aquí. Va literal al prompt: escribirlo para el modelo. */
   description: string;
-  /** 2-3 ejemplos por categoria (PLAN 3.3). Texto corto tipo tweet. */
+  /** 2 ejemplos por categoría. Texto corto tipo tweet. */
   examples: string[];
+  /** La categoría a la que cae lo que no calza en ninguna otra. Solo una. */
+  isFallback?: boolean;
 };
 
 export const CATEGORIES: CategoryDefinition[] = [
   {
     name: "AI News",
     description:
-      "Noticias y lanzamientos de IA: modelos nuevos, rondas de inversion de empresas de IA, movimientos del sector, resultados de benchmarks. Es la noticia en si; si el tweet explica como usar algo, va en AI Docs/Updates.",
+      "Noticias y lanzamientos de IA: modelos nuevos, rondas de inversión de empresas de IA, movimientos del sector, resultados de benchmarks. Es la noticia en sí; si el item explica cómo usar algo, va en AI Docs/Updates.",
     examples: [
-      "Anthropic lanza Claude Opus 5, disponible hoy en la API",
-      "Today we're releasing Personal Computer. Personal Computer integrates with the apps you already use",
+      "Un laboratorio anuncia su nuevo modelo insignia, disponible hoy en su API",
+      "Una empresa de IA levanta una ronda y triplica su valuación en seis meses",
     ],
   },
   {
     name: "AI Docs/Updates",
     description:
-      "Documentacion tecnica, changelogs, releases, tutoriales y guias de implementacion de herramientas de IA. Lo que te ensena a usar algo de IA. Si el proyecto no tiene que ver con IA, va en Developer Tools & Projects.",
+      "Documentación técnica, changelogs, releases, tutoriales y guías de implementación de herramientas de IA. Lo que te enseña a usar algo de IA. Si el proyecto no tiene que ver con IA, va en Developer Tools & Projects.",
     examples: [
-      "Nuevo en la doc: guia de prompt caching con ejemplos por lenguaje",
-      "n8n's official Claude Code connector can now create and edit workflows!",
+      "Nueva guía en la documentación: cómo cachear prompts, con ejemplos por lenguaje",
+      "El conector oficial de esta herramienta ya permite crear y editar flujos",
     ],
   },
   {
     name: "Developer Tools & Projects",
     description:
-      "Herramientas de codigo, librerias, CLIs, repos open source y proyectos que alguien construyo, cuando el tema central NO es la IA. Incluye el clasico 'hice esto y aqui esta el link'.",
+      "Herramientas de código, librerías, CLIs, repos open source y proyectos que alguien construyó, cuando el tema central NO es la IA. Incluye el clásico 'hice esto y aquí está el link'.",
     examples: [
-      "made a tiny terminal app to download videos from youtube, instagram, etc — npm i -g yoinks",
-      "I built an MCP server for WhatsApp. It's fully open-source, self-hosted and doesn't rely on third-party services",
+      "Hice una CLI diminuta para descargar videos; se instala con un comando",
+      "Publiqué un servidor open source, self-hosted y sin dependencias de terceros",
     ],
   },
   {
     name: "Startup & Business",
     description:
-      "Negocio y producto: lanzamientos de empresa, metricas y revenue, levantamiento de capital, contrataciones, marca, y reflexiones de emprendedor. Si la empresa es de IA y la nota es la noticia del modelo, va en AI News.",
+      "Negocio y producto: lanzamientos de empresa, métricas y revenue, levantamiento de capital, contrataciones, marca y reflexiones de emprendedor. Si la empresa es de IA y la nota es la noticia del modelo, va en AI News.",
     examples: [
-      "we launched publicly 8 days ago, hit $1M ARR today, and only took down one cloud provider along the way",
-      "70% of local businesses still don't have proper websites. what if we...",
+      "Lanzamos hace ocho días y hoy cruzamos el primer millón de ingresos recurrentes",
+      "La mayoría de los negocios locales todavía no tiene sitio web; ahí hay un mercado",
     ],
   },
   {
     name: "Personal & Pop-Culture",
     description:
-      "REGLA DURA: si el item habla de una pelicula o serie lesbica, gay, sapphic o queer, NO va aqui — va en Movies, sin excepcion y sin importar el tono (pregunta suelta, recomendacion casual, hilo de fans, anecdota personal). Fuera de eso: memes, chistes, videos virales, anecdotas personales, musica, celebridades y comentario ligero del dia a dia. La cobertura de cine y series (estrenos, trailers, criticas) va en Movies; el comentario personal sobre una pelicula o serie que no es queer si se queda aqui. Libros y novelas no son cine: se quedan aqui aunque sean sapphic.",
+      "Memes, chistes, videos virales, anécdotas personales, música, celebridades y comentario ligero del día a día. La cobertura de cine y series (estrenos, tráilers, críticas) va en Movies; el comentario personal sobre una película o serie sí se queda aquí. Libros y novelas no son cine: se quedan aquí.",
     examples: [
-      "If you can wear a lobster costume with authority, you're safe from becoming a stiff",
-      "llegas por un cafe y te encuentras con @FridaRuh — vida presencial > vida remota",
-      "segun un insider de Netflix, Cruel Summer de Taylor Swift aparece en la temporada 3",
+      "Hoy aprendí que la confianza con la que dices algo pesa más que el contenido",
+      "Fui por un café y me encontré con alguien que solo conocía por internet",
     ],
   },
   {
@@ -75,49 +74,51 @@ export const CATEGORIES: CategoryDefinition[] = [
     description:
       "Meetups, hackathones, charlas, conferencias y networking: convocatorias, participaciones y recuentos. Lo que tiene fecha y lugar.",
     examples: [
-      "Sabado 13 de mayo en Hermosillo, Sonora. Participare en @TEDxPitic y compartire espacio con grandes especialistas",
-      "Ya casi es el #GoogleIO, y es un buen momento para hacer networking!",
+      "El sábado doy una charla en la conferencia local; nos vemos ahí",
+      "Se viene el evento anual: buen momento para agendar café con gente del sector",
     ],
   },
   {
     name: "Social Commentary",
     description:
-      "Politica, sociedad, genero e identidad, salud mental, religion y temas de fondo. Opinion sobre el mundo, no sobre tecnologia ni sobre la vida personal de quien tuitea.",
+      "Política, sociedad, género e identidad, salud mental, religión y temas de fondo. Opinión sobre el mundo, no sobre tecnología ni sobre la vida personal de quien publica.",
     examples: [
-      "Si la disyuntiva esta entre respetar el lenguaje y respetar la identidad de una persona, SIEMPRE VOY A ELEGIR RESPETAR LA IDENTIDAD",
-      "El Papa Francisco movio muchas cosas para tratar que la Iglesia se alejara de ese conservadurismo",
+      "Entre respetar la forma y respetar a la persona, la persona gana siempre",
+      "El acceso a salud mental sigue siendo un privilegio y no un servicio básico",
     ],
   },
   {
     name: "Crypto/Web3",
-    description:
-      "Criptomonedas, NFTs, DeFi, blockchains y tooling de web3.",
+    description: "Criptomonedas, NFTs, DeFi, blockchains y tooling de web3.",
     examples: [
-      "Meta is now paying creators in $USDC in Colombia and Philippines (on @Solana)",
-      "web3 builders: your feed is noise; offline interactions are the signal",
+      "Una plataforma empieza a pagar a creadores en stablecoins en dos países más",
+      "Para quien construye en web3: el feed es ruido, las conversaciones offline son la señal",
     ],
   },
   {
     name: "Movies",
     description:
-      "REGLA DURA: cualquier item sobre cine o series lesbico, gay, sapphic o queer va aqui SIEMPRE, sin importar el tono — una pregunta suelta, una recomendacion casual, un hilo de fans o una anecdota personal cuentan igual que una critica. Esta regla le gana a Personal & Pop-Culture. Fuera de eso: cine y series en general — estrenos, trailers, criticas, premios, reparto. Libros y novelas no cuentan como cine.",
+      "Cine y series: estrenos, tráilers, críticas, premios, reparto y recomendaciones. Libros y novelas no cuentan como cine — esos van en Personal & Pop-Culture.",
     examples: [
-      "El trailer de Dune Parte 3 ya esta arriba",
-      "Hayley Kiyoko's 'GIRLS LIKE GIRLS' debuts with 85% on Rotten Tomatoes",
-      "a beautiful french lesbian movie i watched recently, highly recommend it",
-      "drop your favorite wlw show, i need something to binge this weekend",
+      "Ya salió el tráiler de la tercera parte y se estrena a fin de año",
+      "Recomiéndenme una serie para maratonear el fin de semana",
     ],
   },
   {
     name: "Otros",
     description:
-      "Lo que no calza en ninguna categoria existente y tampoco justifica una nueva. Usarla es el ultimo recurso, no el default: si un item calza aunque sea parcialmente en otra categoria, esa gana.",
-    examples: ["Buenos dias a todos menos a los que no pusieron modo oscuro"],
+      "Lo que no calza en ninguna categoría existente y tampoco justifica una nueva. Usarla es el último recurso, no el default: si un item calza aunque sea parcialmente en otra categoría, esa gana.",
+    examples: [
+      "Buenos días a todos menos a quienes no usan modo oscuro",
+      "Recordatorio de que hoy es martes y eso es todo lo que tengo",
+    ],
+    isFallback: true,
   },
 ];
 
-/** Nombre de la categoria de fallback; nunca debe faltar del catalogo. */
-export const FALLBACK_CATEGORY = "Otros";
+/** Nombre de la categoría de fallback; nunca debe faltar del catálogo. */
+export const FALLBACK_CATEGORY =
+  CATEGORIES.find((c) => c.isFallback)?.name ?? "Otros";
 
 export const CATEGORY_NAMES = CATEGORIES.map((c) => c.name);
 

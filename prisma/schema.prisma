@@ -1,5 +1,10 @@
-// Prisma schema para x-likes-curator
-// Modelo definido en PLANS/TWITTER_LIKES_CURATION_PLATFORM.md (sección 4)
+// Prisma schema para tools4foresight (multi-tenant).
+//
+// Regla no negociable (PLAN §1): TODA tabla del pipeline lleva `owner_id`
+// (o `user_id` para las tablas 1:1 con el usuario) y TODO query lo filtra,
+// incluido cada $queryRaw/$executeRaw. La segunda barrera es RLS en Postgres
+// (migración `_rls`): las políticas leen `current_setting('app.owner_id')`, que
+// se fija con `withOwner()` de src/lib/tenant-db.ts dentro de una transacción.
 
 generator client {
   provider = "prisma-client"
@@ -11,23 +16,45 @@ datasource db {
 }
 
 // --- Auth (better-auth, magic link) ---
+
+// Un tenant = un User. `role` distingue al dueño de la plataforma (Frida) del
+// resto; NO controla el acceso al banco de señales: cada usuario es dueño del
+// suyo y lo ve completo.
+//   user           -> usuario normal, dueño de su tenant
+//   platform_admin -> Frida: panel /admin, cuotas, flags globales (Fase 5)
 model User {
   id            String   @id @default(uuid())
   name          String
   email         String   @unique
   emailVerified Boolean  @default(false) @map("email_verified")
   image         String?
-  // admin -> Frida, ve /enrich /conexion /categorias y puede mutar. member -> usuario.
-  role          String   @default("member")
+  role          String   @default("user")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   sessions Session[]
   accounts Account[]
 
+  // Tenant: todo lo de abajo muere con el usuario (borrar cuenta = borrar banco).
+  xAuthToken            XAuthToken?
+  ingestionCursor       IngestionCursor?
+  secrets               UserSecret[]
+  quota                 UserQuota?
+  usageEvents           UsageEvent[]
+  categories            Category[]
+  jobRuns               JobRun[]
+  likedItems            LikedItem[]
+  likedItemCustomFields LikedItemCustomField[]
+  customFieldDefs       CustomFieldDefinition[]
+  semanticLinks         SemanticLink[]
+  semanticClusters      SemanticCluster[]
+  graphSnapshots        GraphSnapshot[]
+  graphSnapshotClusters GraphSnapshotCluster[]
+  graphSnapshotMembers  GraphSnapshotMember[]
+  promptSettings        PromptSetting[]
+
   @@map("users")
 }
-
 
 model Session {
   id        String   @id @default(uuid())
@@ -43,8 +70,8 @@ model Session {
   @@map("sessions")
 }
 
-// Sin proveedores OAuth por ahora (solo magic link), pero better-auth la pide
-// igual: el plugin de magic link no la usa, otros plugins futuros si.
+// Sin proveedores OAuth por ahora (magic link + password), pero better-auth la
+// pide igual: `accounts.password` guarda el hash del registro con contraseña.
 model Account {
   id                    String    @id @default(uuid())
   accountId             String    @map("account_id")
@@ -76,51 +103,204 @@ model Verification {
   @@map("verifications")
 }
 
+// --- Tenant: secretos, cuotas y uso ---
+
+// BYOK. Hoy solo `provider = "anthropic"` (foresight), pero la tabla admite más.
+// `encrypted` guarda el blob con versión de clave (v1.<iv>.<tag>.<ct>), nunca la
+// key en claro. `last4` es lo único que se muestra en la UI.
+model UserSecret {
+  userId     String    @map("user_id")
+  provider   String
+  encrypted  String
+  last4      String
+  // Modelo elegido por el usuario para esa key (p.ej. "claude-sonnet-5").
+  // Null = el default del código.
+  model      String?
+  // Null = sin verificar o key rechazada (401). El job de foresight se salta al
+  // tenant sin key verificada, sin error.
+  verifiedAt DateTime? @map("verified_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, provider])
+  @@map("user_secrets")
+}
+
+// Límites y contadores por tenant. Los contadores se reinician cuando
+// `windowResetAt` queda en el pasado (ver src/lib/quota.ts, Fase 2).
+model UserQuota {
+  userId             String   @id @map("user_id")
+  xPagesPerDay       Int      @default(2) @map("x_pages_per_day")
+  xBackfillPages     Int      @default(3) @map("x_backfill_pages")
+  xBackfillMonths    Int      @default(3) @map("x_backfill_months")
+  analyzeItemsPerDay Int      @default(150) @map("analyze_items_per_day")
+  xPagesUsedToday    Int      @default(0) @map("x_pages_used_today")
+  analyzeUsedToday   Int      @default(0) @map("analyze_used_today")
+  windowResetAt      DateTime @default(now()) @map("window_reset_at")
+  pipelineEnabled    Boolean  @default(true) @map("pipeline_enabled")
+  // Marca de "el grafo de este tenant quedó sucio" (publicó/despublicó algo).
+  // El cron de grafo solo procesa tenants con graphDirtyAt != null (PLAN 3.10).
+  graphDirtyAt       DateTime? @map("graph_dirty_at")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_quotas")
+}
+
+// Auditoría de costo por tenant: una fila por llamada externa.
+model UsageEvent {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  // x_page | ollama_call | anthropic_call | openai_embed | fetch
+  kind      String
+  units     Int
+  tokensIn  Int?     @map("tokens_in")
+  tokensOut Int?     @map("tokens_out")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@map("usage_events")
+}
+
+// Estado de cada corrida de job por tenant (reemplaza el "remaining" global).
+model JobRun {
+  id         String    @id @default(uuid())
+  ownerId    String    @map("owner_id")
+  // ingest | fetch | categorize | analyze | embed | graph
+  job        String
+  // queued | running | ok | error | budget
+  status     String    @default("queued")
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  processed  Int       @default(0)
+  remaining  Int       @default(0)
+  error      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, job, startedAt(sort: Desc)])
+  @@map("job_runs")
+}
+
+// Flags globales de la plataforma (NO es tabla de tenant, no lleva RLS).
+// Hoy: "x_credits_depleted" -> la X App compartida se quedó sin créditos.
+model PlatformFlag {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_flags")
+}
+
+// --- Tenant: conexión con X ---
+
 model XAuthToken {
   id           String   @id @default(uuid())
-  xUserId      String   @unique @map("x_user_id")
+  userId       String   @unique @map("user_id")
+  xUserId      String   @map("x_user_id")
   accessToken  String   @map("access_token") // cifrado a nivel de aplicación
   refreshToken String   @map("refresh_token") // cifrado a nivel de aplicación
   expiresAt    DateTime @map("expires_at")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Sin unique global sobre xUserId: la validación "esa cuenta de X ya está
+  // conectada a otro usuario" se hace en el callback (Fase 2.1), porque con RLS
+  // un unique global filtraría existencia entre tenants.
+  @@index([xUserId])
   @@map("x_auth_tokens")
 }
 
-model LikedItem {
-  id String @id @default(uuid())
+model IngestionCursor {
+  id                    String    @id @default(uuid())
+  userId                String    @unique @map("user_id")
+  lastTweetId           String?   @map("last_tweet_id")
+  lastRunAt             DateTime? @map("last_run_at")
+  // Estado de la última corrida, para que la UI pueda avisar cosas como
+  // "necesitas recargar créditos en X" sin volver a correr el job.
+  lastStatus            String    @default("idle") @map("last_status") // idle | ok | error_credits_depleted | error
+  lastError             String?   @map("last_error")
+  // Si X respondió 429, hasta cuándo hay que dejar de pedirle (Fase 2.3).
+  retryAfter            DateTime? @map("retry_after")
+  // Backfill en progreso: pagination_token para retomar donde se quedó y el
+  // tweet_id más reciente visto en este ciclo (se fija como last_tweet_id solo
+  // cuando el ciclo termina de verdad).
+  resumePaginationToken String?   @map("resume_pagination_token")
+  pendingNewestTweetId  String?   @map("pending_newest_tweet_id")
+  // Extremos del orden de likes ya asignados (rank más alto = like más reciente).
+  maxLikeRank           Int?      @map("max_like_rank")
+  minLikeRank           Int?      @map("min_like_rank")
+  backfillReachedWindow Boolean   @default(false) @map("backfill_reached_window")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
 
-  // De donde salio el item:
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("ingestion_cursor")
+}
+
+// --- Tenant: catálogo de categorías ---
+
+// Reemplaza src/config/categories.ts: cada usuario edita el suyo. Se siembra al
+// crear la cuenta (src/lib/seed-tenant.ts) con la plantilla genérica.
+model Category {
+  id          String   @id @default(uuid())
+  ownerId     String   @map("owner_id")
+  name        String
+  description String
+  examples    String[] @default([])
+  position    Int      @default(0)
+  // "Otros": la categoría a la que cae lo que el modelo no supo clasificar.
+  isFallback  Boolean  @default(false) @map("is_fallback")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, name])
+  @@index([ownerId, position])
+  @@map("categories")
+}
+
+// --- Tenant: el pipeline ---
+
+model LikedItem {
+  id      String @id @default(uuid())
+  ownerId String @map("owner_id")
+
+  // De donde salió el item:
   //   x_like -> lo trajo la ingesta de likes de X
-  //   manual -> Frida pego el enlace a mano en la pantalla de enriquecimiento
-  // Un item manual no tiene tweet detras, pero ocupa las mismas columnas: `tweetId`
-  // lleva un id sintetico (manual:<uuid>), `tweetUrl` y `tweetText` llevan la URL, y
-  // `authorHandle` el dominio. Asi la categorizacion y el analisis lo procesan sin
-  // ramas especiales — ya sabian lidiar con un tweet que es solo un link.
+  //   manual -> el usuario pegó el enlace a mano en la pantalla de enriquecimiento
+  // Un item manual no tiene tweet detrás pero ocupa las mismas columnas: `tweetId`
+  // lleva un id sintético (manual:<uuid>), `tweetUrl`/`tweetText` la URL y
+  // `authorHandle` el dominio.
   source String @default("x_like")
 
-  tweetId      String   @unique @map("tweet_id")
+  tweetId      String   @map("tweet_id")
   authorHandle String   @map("author_handle")
   authorName   String?  @map("author_name")
   tweetText    String   @map("tweet_text")
   tweetUrl     String   @map("tweet_url")
   mediaUrls    String[] @default([]) @map("media_urls")
 
-  // --- Las tres fechas del item (ver PLAN seccion 1.4) ---
-  // La X API no expone cuando ocurrio el like, solo el orden. Por eso separamos:
-  //   tweetCreatedAt -> exacto, derivado del snowflake ID del tweet (sin costo de API)
+  // --- Las tres fechas del item ---
+  //   tweetCreatedAt -> exacto, derivado del snowflake ID del tweet
   //   detectedAt     -> exacto, el momento del polling que lo trajo
-  //   likedAt        -> ESTIMACION acotada entre ambos; es sobre lo que filtra la UI
+  //   likedAt        -> ESTIMACIÓN acotada entre ambos; es sobre lo que filtra la UI
   tweetCreatedAt DateTime? @map("tweet_created_at")
   detectedAt     DateTime? @map("detected_at")
   likedAt        DateTime  @map("liked_at")
-  // tweet_date  = solo se pudo acotar con la fecha del tweet (items historicos)
-  // ordered     = acotado ademas por la ventana entre corridas y el orden de likes
-  likedAtSource String @default("tweet_date") @map("liked_at_source")
-  // Posicion en el orden de likes que devolvio X (0 = el like mas reciente visto).
-  // Se conserva para poder recalcular estimaciones sin volver a pegarle a la API.
-  likeRank Int? @map("like_rank")
+  likedAtSource  String    @default("tweet_date") @map("liked_at_source")
+  // Posición en el orden de likes del tenant (más alto = like más reciente).
+  likeRank       Int?      @map("like_rank")
 
   // contenido enlazado (nullable: no todo tweet tiene link externo)
   contentUrl         String?   @map("content_url")
@@ -131,86 +311,60 @@ model LikedItem {
   fetchedAt          DateTime? @map("fetched_at")
   fetchStatus        String    @default("pending") @map("fetch_status") // pending | success | failed | not_applicable
 
-  // categorizacion
+  // categorización (contra el catálogo del tenant)
   category           String?
-  categorySource     String   @default("auto") @map("category_source") // auto | manual
-  categoryConfidence Decimal? @map("category_confidence")
-  categoryReasoning  String?  @map("category_reasoning") // razon corta del modelo, para auditar mal-clasificaciones
+  categorySource     String    @default("auto") @map("category_source") // auto | manual
+  categoryConfidence Decimal?  @map("category_confidence")
+  categoryReasoning  String?   @map("category_reasoning")
   categorizedAt      DateTime? @map("categorized_at")
 
-  // --- Enriquecimiento (pantalla 2) ---
-  // PESTEL: guarda las claves de config/pestel.ts (political, economic, ...) y no las
-  // etiquetas, para poder cambiar como se muestran sin migrar datos. Hasta 2026-08-09
-  // era siempre a mano; ahora el job de src/lib/jobs/pestel.ts la sugiere sobre likes
-  // de las ultimas 2 semanas, maximo 2 dimensiones por item — igual que category,
-  // 'manual' congela el valor para que el job no lo pise. El default de la columna es
-  // 'auto' para lo nuevo; la migracion que la agrega marca todo lo existente como
-  // 'manual' a proposito, para que el job nunca toque el historico (decision de Frida).
+  // PESTEL: guarda las claves de config/pestel.ts, no las etiquetas.
+  // 'manual' congela el valor para que el job no lo pise (igual que category).
   pestel       String[] @default([])
   pestelSource String   @default("auto") @map("pestel_source") // auto | manual
 
-  // Impacto y "por que importa" los escribe el modelo (job analyze) y Frida los puede
-  // corregir con doble click. `*Source` = 'manual' congela el texto: el job no lo pisa,
-  // igual que categorySource (PLAN 3.3).
-  // TL;DR de ~100 palabras sobre lo que trata el tweet/articulo. Primera columna de
-  // la tabla de analisis; se genera junto con impact y whyMatters en el mismo job.
+  // Textos generados. `*Source = 'manual'` congela el texto: el job no lo pisa.
   tldr            String?
-  tldrSource      String    @default("auto") @map("tldr_source") // auto | manual
+  tldrSource      String    @default("auto") @map("tldr_source")
   tldrGeneratedAt DateTime? @map("tldr_generated_at")
 
   impact            String?
-  impactSource      String    @default("auto") @map("impact_source") // auto | manual
+  impactSource      String    @default("auto") @map("impact_source")
   impactGeneratedAt DateTime? @map("impact_generated_at")
 
-  // Se genera despues de impact y con impact como contexto, asi que puede existir un
-  // item con impact y sin whyMatters (corrida cortada por presupuesto de tiempo).
   whyMatters            String?   @map("why_matters")
-  whyMattersSource      String    @default("auto") @map("why_matters_source") // auto | manual
+  whyMattersSource      String    @default("auto") @map("why_matters_source")
   whyMattersGeneratedAt DateTime? @map("why_matters_generated_at")
 
-  // Foresight: como puede cambiar esto el desarrollo de la IA y la interaccion entre
-  // humanos. Lo escribe Claude (claude-opus-5, src/lib/foresight.ts) a partir del
-  // TL;DR y del "por que importa" ya generados, asi que va al final de la cadena del
-  // job analyze. Columna a la derecha de Impacto en la tabla de analisis; solo se ve
-  // en el back (enrich), no en /senales.
+  // Foresight: lo escribe Claude con la API key DEL USUARIO (BYOK, PLAN 3.7).
   foresight            String?
-  foresightSource      String    @default("auto") @map("foresight_source") // auto | manual
+  foresightSource      String    @default("auto") @map("foresight_source")
   foresightGeneratedAt DateTime? @map("foresight_generated_at")
 
-  // Descartado de la tabla de enriquecimiento, NO del catalogo: el item sigue en la
-  // pantalla de likes y conserva categoria y textos. Solo deja de ocupar una fila en
-  // la tabla que Frida trabaja a mano, y el job de analisis deja de gastarle llamadas.
+  // Descartado de la tabla de enriquecimiento, NO del catálogo.
   enrichDiscarded Boolean @default(false) @map("enrich_discarded")
 
-  // --- Fase 2 del paywall: que ve el cliente pagante (Fase 3+) ---
-  // pending -> sin revisar. published -> visible a miembros. "No relevante" no es
-  // un tercer valor aparte: se unificó con enrichDiscarded (un solo botón, una
-  // sola lista de excluidos — decisión de Frida, 2026-08-09). El paso a
-  // "published" lo valida el server: requiere category + impact + whyMatters
-  // (ver src/lib/publish.ts).
+  // pending -> sin revisar. published -> entra al grafo y a los horizontes.
   publishStatus String    @default("pending") @map("publish_status")
   publishedAt   DateTime? @map("published_at")
 
-  // --- Grafo semantico (pestaña 03, solo admin por ahora) ---
-  // Embedding del texto de la señal (tldr + whyMatters + titulo), generado por el
-  // job de embeddings contra un Ollama local (ollama.com no hostea modelos de
-  // embeddings — verificado 2026-08-19, su catalogo cloud de embeddings esta vacio).
-  // `Unsupported` porque Prisma no habla pgvector: se lee/escribe con $queryRaw.
-  // embeddingHash = sha256 del texto embebido; si Frida edita el TL;DR a mano el
-  // hash deja de coincidir y el job re-embebe solo ese item.
-  embedding     Unsupported("vector(768)")?
-  embeddingHash String?                     @map("embedding_hash")
-  embeddedAt    DateTime?                   @map("embedded_at")
-  // Comunidad tematica detectada sobre el grafo (src/lib/jobs/clusters.ts).
-  // Nullable: señales sueltas o en grupos demasiado chicos quedan sin tema.
-  clusterId     String?                     @map("cluster_id")
-  cluster       SemanticCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-  // Vitalidad de la señal (src/lib/jobs/graph.ts): 0.5^(dias desde likedAt/30),
-  // reanimada por vecinas recientes. La escribe cada corrida del grafo; el canvas
-  // la usa como opacidad/tamaño. Decision de Frida (2026-08-20): vida media 30 dias.
-  vitality      Float?
-  vitalityAt    DateTime?                   @map("vitality_at")
+  // --- Grafo semántico ---
+  // Embedding del texto de la señal (tldr + whyMatters + título). Desde Fase 3 lo
+  // genera OpenAI text-embedding-3-small (1536 dims). `Unsupported` porque Prisma
+  // no habla pgvector: se lee/escribe con $queryRaw — SIEMPRE dentro de withOwner().
+  embedding     Unsupported("vector(1536)")?
+  embeddingHash String?                      @map("embedding_hash")
+  embeddedAt    DateTime?                    @map("embedded_at")
 
+  clusterId String?          @map("cluster_id")
+  cluster   SemanticCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+
+  // Vitalidad de la señal: 0.5^(días desde likedAt/30), reanimada por vecinas
+  // recientes. Vida media 30 días (decisión de Frida).
+  vitality   Float?
+  vitalityAt DateTime? @map("vitality_at")
+
+  owner        User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   customFields LikedItemCustomField[]
   linksAsA     SemanticLink[]         @relation("SemanticLinkA")
   linksAsB     SemanticLink[]         @relation("SemanticLinkB")
@@ -218,107 +372,107 @@ model LikedItem {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([likedAt(sort: Desc)])
-  @@index([category])
-  @@index([fetchStatus])
-  @@index([enrichDiscarded])
-  @@index([publishStatus])
+  @@unique([ownerId, tweetId])
+  @@index([ownerId, likedAt(sort: Desc)])
+  @@index([ownerId, category])
+  @@index([ownerId, fetchStatus])
+  @@index([ownerId, enrichDiscarded])
+  @@index([ownerId, publishStatus])
+  @@index([clusterId])
   @@map("liked_items")
 }
 
-// Arista del grafo semantico: similitud coseno entre dos señales publicadas, por
-// encima del umbral del job (src/lib/jobs/embed.ts). El par va ordenado
-// (itemAId < itemBId) para que la unique constraint deduplique A-B y B-A.
-// Las aristas viven en Postgres, no en memoria: el grafo se arma con un SELECT.
+// Arista del grafo semántico: similitud coseno entre dos señales publicadas DEL
+// MISMO tenant. El par va ordenado (itemAId < itemBId) para deduplicar A-B y B-A.
 model SemanticLink {
   id      String @id @default(uuid())
+  ownerId String @map("owner_id")
   itemAId String @map("item_a_id")
   itemBId String @map("item_b_id")
   score   Float
 
+  owner User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   itemA LikedItem @relation("SemanticLinkA", fields: [itemAId], references: [id], onDelete: Cascade)
   itemB LikedItem @relation("SemanticLinkB", fields: [itemBId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([itemAId, itemBId])
+  @@unique([ownerId, itemAId, itemBId])
+  @@index([ownerId])
   @@index([itemBId])
   @@map("semantic_links")
 }
 
-// Tema del grafo: comunidad de señales densamente conectadas entre si, detectada
-// por el job de clusters y bautizada por el modelo (nombre + por que van juntas).
-// Desde 2026-08-20 la fila es un LINAJE: sobrevive entre corridas (se empareja con
-// la comunidad nueva por solapamiento de miembros, ver graph.ts), acumula
-// indicadores y puede morir y resucitar. membersHash = sha256 de los ids ordenados
-// de sus miembros: si no cambio, el nombre se conserva sin llamar al modelo.
+// Tema del grafo: comunidad de señales densamente conectadas entre sí. La fila es
+// un LINAJE: sobrevive entre corridas (se empareja por solapamiento de miembros),
+// acumula indicadores y puede morir y resucitar.
 model SemanticCluster {
   id          String @id @default(uuid())
+  ownerId     String @map("owner_id")
   name        String
   summary     String
   membersHash String @map("members_hash")
   size        Int
 
-  // alive | dead. Muerto = vitalidad < 1 o no detectado en la ultima corrida. Se
-  // conserva (fosil) y resucita si vuelve a aparecer con vitalidad (decision de
-  // Frida: la muerte es reversible).
-  status       String    @default("alive")
-  firstSeenAt  DateTime  @default(now()) @map("first_seen_at")
-  lastSignalAt DateTime? @map("last_signal_at")
-  diedAt       DateTime? @map("died_at")
-  revivedCount Int       @default(0) @map("revived_count")
-  vitality     Float     @default(0)
-  // Ultima membresia conocida: sirve para emparejar linajes entre corridas y para
-  // saber que señales tuvo un tema muerto (sus items ya tienen clusterId null).
-  lastMemberIds String[] @default([]) @map("last_member_ids")
+  // alive | dead. La muerte es reversible (decisión de Frida).
+  status        String    @default("alive")
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  lastSignalAt  DateTime? @map("last_signal_at")
+  diedAt        DateTime? @map("died_at")
+  revivedCount  Int       @default(0) @map("revived_count")
+  vitality      Float     @default(0)
+  lastMemberIds String[]  @default([]) @map("last_member_ids")
 
-  // Horizonte (H1 | H2 | H3). `horizon` es el efectivo; `horizonSuggested` lo que
-  // la heuristica propone en cada corrida. horizonSource='manual' congela el
-  // efectivo (mismo patron que categorySource).
-  horizon          String? 
+  // Horizonte (H1 | H2 | H3). `horizon` es el efectivo, `horizonSuggested` lo que
+  // la heurística propone; horizonSource='manual' congela el efectivo.
+  horizon          String?
   horizonSuggested String? @map("horizon_suggested")
   horizonSource    String  @default("auto") @map("horizon_source")
 
-  // Indicadores de la ultima corrida (el historial vive en graph_snapshot_clusters).
+  // Indicadores de la última corrida (el historial vive en graph_snapshot_clusters).
   velocity30d     Int    @default(0) @map("velocity_30d")
   velocityPrev30d Int    @default(0) @map("velocity_prev_30d")
-  density         Float? 
-  connectivity    Float? 
-  novelty         Float? 
+  density         Float?
+  connectivity    Float?
+  novelty         Float?
   bridgeClusters  Int    @default(0) @map("bridge_clusters")
 
+  owner     User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   items     LikedItem[]
   snapshots GraphSnapshotCluster[]
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@index([membersHash])
+  @@index([ownerId])
+  @@index([ownerId, membersHash])
   @@map("semantic_clusters")
 }
 
-// Una fila por corrida del grafo (refreshGraph). Es la base de la evolucion
-// temporal: con dos o mas snapshots se ve nacer, crecer y apagarse a los temas.
+// Una fila por corrida del grafo de un tenant (refreshGraph).
 model GraphSnapshot {
   id            String   @id @default(uuid())
+  ownerId       String   @map("owner_id")
   takenAt       DateTime @default(now()) @map("taken_at")
-  // embed | cron | publish | manual: que disparo la corrida.
+  // embed | cron | publish | manual: qué disparó la corrida.
   trigger       String
   nodes         Int
   links         Int
-  clustersAlive Int @map("clusters_alive")
-  clustersDead  Int @map("clusters_dead")
+  clustersAlive Int      @map("clusters_alive")
+  clustersDead  Int      @map("clusters_dead")
   orphans       Int
 
+  owner    User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   clusters GraphSnapshotCluster[]
   members  GraphSnapshotMember[]
 
-  @@index([takenAt(sort: Desc)])
+  @@index([ownerId, takenAt(sort: Desc)])
   @@map("graph_snapshots")
 }
 
-// Serie temporal por tema: como estaba cada linaje en cada snapshot.
+// Serie temporal por tema: cómo estaba cada linaje en cada snapshot.
 model GraphSnapshotCluster {
   id         String @id @default(uuid())
+  ownerId    String @map("owner_id")
   snapshotId String @map("snapshot_id")
   clusterId  String @map("cluster_id")
 
@@ -333,87 +487,75 @@ model GraphSnapshotCluster {
   horizon          String?
   horizonSuggested String? @map("horizon_suggested")
 
+  owner    User            @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   snapshot GraphSnapshot   @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
   cluster  SemanticCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
   @@unique([snapshotId, clusterId])
+  @@index([ownerId])
   @@index([clusterId])
   @@map("graph_snapshot_clusters")
 }
 
-// Membresia señal→tema en cada snapshot, con la vitalidad de ese momento. Es lo
-// que permite reconstruir el grafo de cualquier fecha (slider, PR 2).
+// Membresía señal→tema en cada snapshot, con la vitalidad de ese momento.
 model GraphSnapshotMember {
+  ownerId    String  @map("owner_id")
   snapshotId String  @map("snapshot_id")
   itemId     String  @map("item_id")
   clusterId  String? @map("cluster_id")
   vitality   Float
 
+  owner    User          @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   snapshot GraphSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
   @@id([snapshotId, itemId])
+  @@index([ownerId])
   @@map("graph_snapshot_members")
 }
 
-// Columnas extra que Frida agrega desde la pantalla de enriquecimiento.
-// Existen aunque ningun item tenga valor todavia: la columna se ve vacia en la
-// tabla en vez de desaparecer hasta que alguien la llene.
+// Columnas extra que el usuario agrega desde la pantalla de enriquecimiento.
 model CustomFieldDefinition {
   id        String   @id @default(uuid())
-  fieldKey  String   @unique @map("field_key")
+  ownerId   String   @map("owner_id")
+  fieldKey  String   @map("field_key")
   position  Int      @default(0)
   createdAt DateTime @default(now()) @map("created_at")
 
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, fieldKey])
   @@map("custom_field_definitions")
 }
 
+// Valor de una columna extra en un item. Lleva `ownerId` propio (denormalizado
+// desde liked_items) para que la política de RLS no tenga que hacer un join.
 model LikedItemCustomField {
   id          String    @id @default(uuid())
+  ownerId     String    @map("owner_id")
   likedItemId String    @map("liked_item_id")
   likedItem   LikedItem @relation(fields: [likedItemId], references: [id], onDelete: Cascade)
   fieldKey    String    @map("field_key")
   fieldValue  String?   @map("field_value")
   createdAt   DateTime  @default(now()) @map("created_at")
 
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
   @@unique([likedItemId, fieldKey])
+  @@index([ownerId])
   @@map("liked_item_custom_fields")
 }
 
-model IngestionCursor {
-  id                    String    @id @default(uuid())
-  lastTweetId           String?   @map("last_tweet_id")
-  lastRunAt             DateTime? @map("last_run_at")
-  // Estado de la ultima corrida, para que la UI pueda avisar cosas como
-  // "necesitas recargar creditos en X" sin tener que volver a correr el job.
-  lastStatus            String    @default("idle") @map("last_status") // idle | ok | error_credits_depleted | error
-  lastError             String?   @map("last_error")
-  // Backfill en progreso: si una corrida se corta por el tope de paginas sin
-  // llegar a last_tweet_id ni al final del historial, se guarda aqui el
-  // pagination_token de X para retomar exactamente donde se quedo, y el
-  // tweet_id mas reciente visto en este ciclo (para fijarlo como el nuevo
-  // last_tweet_id solo cuando el ciclo termine de verdad).
-  resumePaginationToken String?   @map("resume_pagination_token")
-  pendingNewestTweetId  String?   @map("pending_newest_tweet_id")
-  // Extremos del orden de likes ya asignados (rank mas alto = like mas reciente).
-  // Los likes nuevos se numeran por encima de maxLikeRank; el backfill, por debajo
-  // de minLikeRank. Asi el orden global sobrevive entre corridas.
-  maxLikeRank Int? @map("max_like_rank")
-  minLikeRank Int? @map("min_like_rank")
-  // Se corta el backfill al llegar a esta antiguedad (ver BACKFILL_WINDOW_MONTHS).
-  backfillReachedWindow Boolean  @default(false) @map("backfill_reached_window")
-  updatedAt             DateTime @updatedAt @map("updated_at")
-
-  @@map("ingestion_cursor")
-}
-
-// Overrides de los system prompts del análisis (impacto y "por qué importa"),
-// editables desde la pantalla de Sistema. Si no hay fila para una clave, rige el
-// default hardcodeado en src/lib/analysis-prompts.ts. Solo dos claves hoy:
-// "impact" y "why_matters".
+// Overrides de los system prompts del análisis, por tenant. Si no hay fila para
+// una clave, rige el default de src/lib/analysis-prompts.ts.
+// Claves: "tldr" | "impact" | "why_matters".
 model PromptSetting {
-  key       String   @id
+  ownerId   String   @map("owner_id")
+  key       String
   value     String
   updatedAt DateTime @updatedAt @map("updated_at")
 
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@id([ownerId, key])
   @@map("prompt_settings")
 }

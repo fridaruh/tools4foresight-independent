@@ -38,13 +38,15 @@ function classifyError(error: unknown): { status: IngestionStatus; message: stri
 }
 
 type CollectedTweet = {
-  row: Omit<Prisma.LikedItemCreateManyInput, "likedAt" | "likedAtSource" | "likeRank">;
+  row: Omit<Prisma.LikedItemCreateManyInput, "ownerId" | "likedAt" | "likedAtSource" | "likeRank">;
   tweetCreatedAt: Date | null;
 };
 
-async function runIngestion() {
-  const cursor = await prisma.ingestionCursor.findFirst();
-  const { xUserId, accessToken } = await getValidAccessToken();
+async function runIngestion(ownerId: string) {
+  // TODO(fase3): mover estas lecturas dentro de withOwner() y quitar los filtros
+  // manuales; por ahora RLS ya acota lo que se ve, pero cada query lo repite.
+  const cursor = await prisma.ingestionCursor.findUnique({ where: { userId: ownerId } });
+  const { xUserId, accessToken } = await getValidAccessToken(ownerId);
 
   // Si venimos de un backfill cortado a la mitad, retomamos desde ese pagination_token
   // y mantenemos el tweet_id "pendiente" que se fijara como cursor solo al terminar el ciclo.
@@ -125,6 +127,7 @@ async function runIngestion() {
 
   if (isResumingBackfill) {
     const oldest = await prisma.likedItem.findFirst({
+      where: { ownerId },
       orderBy: { likedAt: "asc" },
       select: { likedAt: true },
     });
@@ -143,6 +146,7 @@ async function runIngestion() {
 
   const batch: Prisma.LikedItemCreateManyInput[] = collected.map((item, i) => ({
     ...item.row,
+    ownerId,
     likedAt: estimates[i].likedAt,
     likedAtSource: estimates[i].likedAtSource,
     likeRank: startRank - i,
@@ -172,10 +176,11 @@ async function runIngestion() {
   };
 
   await prisma.ingestionCursor.upsert({
-    where: { id: cursor?.id ?? "" },
+    where: { userId: ownerId },
     update: cursorState,
     create: {
       ...cursorState,
+      userId: ownerId,
       lastTweetId: cursorState.lastTweetId ?? undefined,
       pendingNewestTweetId: cursorState.pendingNewestTweetId ?? undefined,
       resumePaginationToken: cursorState.resumePaginationToken ?? undefined,
@@ -193,23 +198,27 @@ async function runIngestion() {
   };
 }
 
-async function recordFailure(error: unknown) {
+async function recordFailure(ownerId: string, error: unknown) {
   const { status, message } = classifyError(error);
-  const cursor = await prisma.ingestionCursor.findFirst();
   await prisma.ingestionCursor.upsert({
-    where: { id: cursor?.id ?? "" },
+    where: { userId: ownerId },
     update: { lastRunAt: new Date(), lastStatus: status, lastError: message },
-    create: { lastRunAt: new Date(), lastStatus: status, lastError: message },
+    create: { userId: ownerId, lastRunAt: new Date(), lastStatus: status, lastError: message },
   });
   return { status, message };
 }
 
-export async function ingestLikes() {
+/**
+ * Ingesta los likes de X de UN tenant. `ownerId` es obligatorio: no existe una
+ * ingesta "global".
+ * TODO(fase2.4): el tope de paginas sale de UserQuota, no de la constante de arriba.
+ */
+export async function ingestLikes(ownerId: string) {
   try {
-    const summary = await runIngestion();
+    const summary = await runIngestion(ownerId);
     return { ok: true as const, ...summary };
   } catch (error) {
-    const { status, message } = await recordFailure(error);
+    const { status, message } = await recordFailure(ownerId, error);
     return { ok: false as const, errorType: status, error: message };
   }
 }
