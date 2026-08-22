@@ -4,6 +4,8 @@ import { CategoryEditor, type CategoryDTO } from "@/components/CategoryEditor";
 import { getCategoriesOverview } from "@/lib/category-service";
 import { requireUserPage } from "@/lib/require-user";
 import { withOwner } from "@/lib/tenant-db";
+import { SourcesBoard } from "@/components/SourcesBoard";
+import { summarizeSources } from "@/lib/sources";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function CategoriasPage() {
   const user = await requireUserPage();
 
-  const { categories, distribution, uncategorizedCount, proposed, lowConfidence } = await withOwner(
+  const { categories, distribution, uncategorizedCount, proposed, lowConfidence, sources } = await withOwner(
     user.userId,
     async (tx) => {
       const overview = await getCategoriesOverview(tx, user.userId);
@@ -33,7 +35,11 @@ export default async function CategoriasPage() {
           authorHandle: true,
         },
       });
-      return { ...overview, lowConfidence };
+      const sourceRows = await tx.likedItem.findMany({
+        where: { ownerId: user.userId },
+        select: { source: true, authorHandle: true, contentUrl: true, tweetUrl: true },
+      });
+      return { ...overview, lowConfidence, sources: summarizeSources(sourceRows) };
     },
   );
 
@@ -72,6 +78,8 @@ export default async function CategoriasPage() {
         proposed={proposed}
         uncategorized={uncategorized}
       />
+
+      <SourcesBoard summary={sources} />
 
       {lowConfidence.length > 0 && (
         <section className="flex flex-col gap-3">
