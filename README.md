@@ -189,3 +189,14 @@ Tokens (colores, tipografía, espaciado): `DESIGN_TOKENS.md` y `src/app/globals.
 Antes de commitear cambios en jobs o schema: `npm run qa`.
 
 Ver `CLAUDE.md` para reglas internas del repo.
+
+## Usuario demo y capturas del onboarding
+
+Las capturas de `public/onboarding/` las pintan el tour y las introducciones por módulo. Para rehacerlas cuando cambie una pantalla:
+
+```bash
+npm run seed:demo          # (re)crea demo@individual.local con 43 señales, 18 publicadas y un grafo de 3 temas
+npm run shots:onboarding   # levanta next dev en :3123, entra como demo y captura las 8 imágenes
+```
+
+El usuario demo no se borra al final para poder repetir las capturas. Contraseña en `scripts/seed-demo.ts`.

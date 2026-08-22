@@ -12,13 +12,7 @@
  * empieza por Sistema porque sin conexión no hay nada que ver. De este orden
  * salen los "Paso N" y la numeración del widget.
  *
- * TODO(capturas): la fórmula usa capturas reales de la app. Faltan estos ocho
- * archivos en `public/onboarding/`; mientras no existan, `screenshot`/`image`
- * quedan sin definir y los modales pintan el panel negro de respaldo:
- *   sistema.png · catalogo.png · categorias.png · analisis.png · grafo.png
- *   horizontes.png · tour-guia.png · tour-nav.png
- * Al agregarlas, basta con poner `screenshot: '/onboarding/<archivo>.png'` en el
- * módulo correspondiente (y `image:` en los pasos 3 y 4 del tour).
+ * Capturas reales en public/onboarding/ (regenerar con `npm run seed:demo && npm run shots:onboarding`).
  */
 
 export type ModuleKey =
@@ -110,6 +104,7 @@ export type ModuleIntro = {
 export const MODULE_INTROS: ModuleIntro[] = [
   {
     key: "sistema",
+    screenshot: "/onboarding/sistema.png",
     route: "/conexion",
     title: "Paso 1 · Sistema",
     icon: "sistema",
@@ -125,6 +120,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
   },
   {
     key: "catalogo",
+    screenshot: "/onboarding/catalogo.png",
     route: "/",
     title: "Paso 2 · Catálogo",
     icon: "catalogo",
@@ -139,6 +135,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
   },
   {
     key: "categorias",
+    screenshot: "/onboarding/categorias.png",
     route: "/categorias",
     title: "Paso 3 · Categorías",
     icon: "categorias",
@@ -152,6 +149,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
   },
   {
     key: "analisis",
+    screenshot: "/onboarding/analisis.png",
     route: "/enrich",
     title: "Paso 4 · Análisis",
     icon: "analisis",
@@ -166,6 +164,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
   },
   {
     key: "grafo",
+    screenshot: "/onboarding/grafo.png",
     route: "/grafo",
     title: "Paso 5 · Grafo",
     icon: "grafo",
@@ -180,6 +179,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
   },
   {
     key: "horizontes",
+    screenshot: "/onboarding/horizontes.png",
     route: "/horizontes",
     title: "Paso 6 · Horizontes",
     icon: "horizontes",
@@ -311,7 +311,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     title: "Tu guía, siempre a mano",
-    // TODO(capturas): image: '/onboarding/tour-guia.png'
+    image: "/onboarding/tour-guia.png",
     imageLabel: "Guía de configuración",
     icon: "guia",
     description:
@@ -320,7 +320,7 @@ export const TOUR_STEPS: TourStep[] = [
   },
   {
     title: "Tus herramientas",
-    // TODO(capturas): image: '/onboarding/tour-nav.png'
+    image: "/onboarding/tour-nav.png",
     imageLabel: "Navegación",
     icon: "nav",
     description:

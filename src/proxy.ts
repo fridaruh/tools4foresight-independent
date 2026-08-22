@@ -34,6 +34,11 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!api/jobs|api/auth|login|registro|terminos|privacidad|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|logo-aitns.png).*)",
+    // `onboarding/` queda fuera: son las capturas de public/onboarding/*.png que
+    // pintan los modales del tour. Se piden desde una <img>, que no manda la
+    // cookie de sesión en todos los contextos, y sin esta exclusión el proxy las
+    // redirigía a /login — el modal enseñaba el HTML del login como imagen rota.
+    // No hay ruta de app bajo /onboarding, así que no abre nada más.
+    "/((?!api/jobs|api/auth|onboarding/|login|registro|terminos|privacidad|_next/static|_next/image|favicon.ico|icon.png|apple-icon.png|logo-aitns.png).*)",
   ],
 };

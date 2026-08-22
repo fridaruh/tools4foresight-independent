@@ -54,6 +54,9 @@ export function GuideWidget() {
   return (
     <aside
       aria-label="Guía de configuración"
+      // Ancla de scripts/onboarding-screenshots.ts: la captura tour-guia.png
+      // recorta exactamente este nodo. No quitarlo al refactorizar el layout.
+      data-onboarding="guide"
       className="fixed right-4 bottom-4 z-50 hidden w-[300px] flex-col border border-ink bg-surface-1 md:flex"
     >
       <div className="flex items-center gap-2 px-4 pt-3.5 pb-1">

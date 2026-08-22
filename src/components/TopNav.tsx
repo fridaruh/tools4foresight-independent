@@ -39,7 +39,12 @@ export function TopNav({
   const sections = role === "platform_admin" ? [...SECTIONS, ADMIN_SECTION] : role !== null ? SECTIONS : [];
 
   return (
-    <header className="sticky top-0 z-30 border-b border-ink bg-canvas/90 backdrop-blur">
+    <header
+      // Ancla de scripts/onboarding-screenshots.ts: la captura tour-nav.png
+      // recorta exactamente este nodo. No quitarlo al refactorizar el layout.
+      data-onboarding="nav"
+      className="sticky top-0 z-30 border-b border-ink bg-canvas/90 backdrop-blur"
+    >
       {/* En movil la nav baja a una segunda fila de ancho completo (order-last) y
           scrollea horizontal si las secciones no caben; de md hacia arriba vuelve a
           ser la fila unica de siempre. */}
