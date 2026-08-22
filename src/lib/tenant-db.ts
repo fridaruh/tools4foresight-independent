@@ -30,6 +30,21 @@
  *   `tenantClient()` no fija el contexto de Postgres; filtra en la aplicación, así
  *   que sirve para queries de Prisma sueltas pero NO habilita raw SQL.
  *
+ * TABLAS SIN RLS, Y POR QUÉ (revisión de seguridad, PLAN 5.4):
+ *   - `users`, `sessions`, `accounts`, `verifications`: son de better-auth. Las
+ *     dos últimas tienen `user_id`, pero ponerles la política de tenant sería
+ *     circular: `getSession()` corre ANTES de que exista un `app.owner_id` que
+ *     fijar — es justamente el query que descubre quién es el usuario. Se
+ *     acceden solo a través de better-auth (`auth.api.*`) o, en los tres puntos
+ *     que lo necesitan (`/api/perfil`, `/api/perfil/password`, `/perfil`),
+ *     con un `where` que siempre lleva el `userId` de la sesión.
+ *   - `rate_limits`, `platform_flags`: no son de tenant, son de la plataforma.
+ *     No guardan nada de nadie (un contador por IP/email, un flag global).
+ *   - `_prisma_migrations`: metadata de Prisma.
+ * Toda tabla del PIPELINE con `owner_id`/`user_id` sí tiene política — la lista
+ * es exactamente `TENANT_MODEL_FIELD` de abajo, y `scripts/qa-tenant-isolation.ts`
+ * la verifica contra la DB en cada corrida de `npm run qa`.
+ *
  * Nota sobre el rol de la base: el runtime se conecta como `t4f_app`, que NO tiene
  * BYPASSRLS. Si alguien apunta DATABASE_URL a `neondb_owner` (que en Neon sí tiene
  * BYPASSRLS y no se le puede quitar), la barrera 1 desaparece en silencio.

@@ -15,6 +15,23 @@ import { prisma } from "@/lib/prisma";
 const WINDOW_MS = 5 * 60 * 1000;
 const MAX_ATTEMPTS = 5;
 
+/** Lo que va en el header `Retry-After` de un 429 (segundos). */
+export const RETRY_AFTER_SECONDS = Math.ceil(WINDOW_MS / 1000);
+
+/**
+ * Headers estándar para una respuesta 429. `Retry-After` es el que respetan los
+ * clientes; los `X-RateLimit-*` son informativos y se mandan para que la UI (y
+ * quien depure en producción) vea el límite sin adivinarlo.
+ */
+export function rateLimitHeaders(): Record<string, string> {
+  return {
+    "Retry-After": String(RETRY_AFTER_SECONDS),
+    "X-RateLimit-Limit": String(MAX_ATTEMPTS),
+    "X-RateLimit-Remaining": "0",
+    "X-RateLimit-Reset": String(Math.floor((Date.now() + WINDOW_MS) / 1000)),
+  };
+}
+
 type RateLimitResult = {
   count: number;
 };

@@ -1,6 +1,33 @@
+import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
-import { isRateLimited, requestIp } from "@/lib/rate-limit";
+import { isRateLimited, rateLimitHeaders, requestIp } from "@/lib/rate-limit";
 import { getSessionUser } from "@/lib/require-user";
+
+/**
+ * ¿Trae la request el `Authorization: Bearer <CRON_SECRET>` correcto?
+ *
+ * La comparación es de tiempo constante (`timingSafeEqual`): un `===` sobre
+ * strings corta en el primer byte distinto, y con un endpoint que se puede
+ * llamar sin límite eso filtra el secreto byte a byte. Se comparan hashes de
+ * igual longitud para no revelar tampoco cuánto mide el secreto — `timingSafeEqual`
+ * lanza si los buffers difieren en tamaño.
+ */
+function hasCronSecret(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+
+  const header = request.headers.get("authorization");
+  if (!header) return false;
+
+  const expected = sha256(`Bearer ${secret}`);
+  const actual = sha256(header);
+  return timingSafeEqual(expected, actual);
+}
+
+/** Hash de 32 bytes: normaliza la longitud para poder comparar en tiempo constante. */
+function sha256(value: string): Buffer {
+  return createHash("sha256").update(value, "utf8").digest();
+}
 
 // Los endpoints de /api/jobs/* quedan fuera del matcher del proxy porque Vercel
 // los invoca sin cookie de sesion (manda `Authorization: Bearer <CRON_SECRET>`).
@@ -8,10 +35,7 @@ import { getSessionUser } from "@/lib/require-user";
 // estos mismos endpoints desde el navegador, así que tambien aceptan una sesión
 // de usuario para no romper ese flujo.
 export async function isJobRequestAuthorized(request: Request): Promise<boolean> {
-  const secret = process.env.CRON_SECRET;
-  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) {
-    return true;
-  }
+  if (hasCronSecret(request)) return true;
   return (await getSessionUser()) !== null;
 }
 
@@ -20,7 +44,10 @@ export async function isJobRequestAuthorized(request: Request): Promise<boolean>
 export async function unauthorizedJobResponse(request: Request): Promise<NextResponse> {
   const limited = await isRateLimited(`job:${requestIp(request)}`);
   if (limited) {
-    return NextResponse.json({ ok: false, error: "Demasiados intentos" }, { status: 429 });
+    return NextResponse.json(
+      { ok: false, error: "Demasiados intentos" },
+      { status: 429, headers: rateLimitHeaders() },
+    );
   }
   return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
 }
@@ -34,9 +61,7 @@ export async function unauthorizedJobResponse(request: Request): Promise<NextRes
  * UI pega a `…/run`, que sí acepta sesión y queda acotado a su propio owner.
  */
 export function isCronRequest(request: Request): boolean {
-  const secret = process.env.CRON_SECRET;
-  if (!secret) return false;
-  return request.headers.get("authorization") === `Bearer ${secret}`;
+  return hasCronSecret(request);
 }
 
 export type JobRequest =
@@ -57,10 +82,9 @@ export type JobRequest =
  * header más el owner de cada tenant.
  */
 export async function resolveJobRequest(request: Request): Promise<JobRequest> {
-  const secret = process.env.CRON_SECRET;
   const requestedOwner = new URL(request.url).searchParams.get("owner");
 
-  if (secret && request.headers.get("authorization") === `Bearer ${secret}`) {
+  if (hasCronSecret(request)) {
     if (!requestedOwner) {
       return {
         ok: false,

@@ -37,10 +37,20 @@ const RUN_STATUS_LABELS: Record<string, string> = {
   budget: "cortado por tiempo",
 };
 
-const X_ERROR_LABELS: Record<string, string> = {
-  state: "La conexión con X expiró o no se pudo verificar. Intenta de nuevo.",
-  cuenta_ya_conectada: "Esa cuenta de X ya está conectada a otro usuario.",
-};
+/**
+ * Copy de cada `?x_error=` que puede mandar el callback de X.
+ *
+ * Es un `Map` y no un objeto a propósito: `x_error` viene del query string, o
+ * sea del usuario, y un lookup en un objeto plano con `constructor` o
+ * `toString` devolvería una función del prototipo — que React no sabe
+ * renderizar. Un `Map` solo tiene las claves que se le pusieron.
+ */
+const X_ERROR_LABELS = new Map<string, string>([
+  ["state", "La conexión con X expiró o no se pudo verificar. Intenta de nuevo."],
+  ["cuenta_ya_conectada", "Esa cuenta de X ya está conectada a otro usuario."],
+  ["intercambio", "X no completó el intercambio de credenciales. Intenta de nuevo en un momento."],
+  ["sin_refresh", "X no devolvió un token de larga duración. Vuelve a autorizar la app."],
+]);
 
 export default async function ConexionPage({
   searchParams,
@@ -115,7 +125,7 @@ export default async function ConexionPage({
         <div className="border border-ink border-l-4 border-l-danger bg-surface-1 p-4 text-sm">
           <p className="label-mono text-danger">status: error</p>
           <p className="mt-1 text-ink-subtle">
-            {X_ERROR_LABELS[x_error] ?? "No se pudo completar la conexión con X."}
+            {X_ERROR_LABELS.get(x_error) ?? "No se pudo completar la conexión con X."}
           </p>
         </div>
       )}

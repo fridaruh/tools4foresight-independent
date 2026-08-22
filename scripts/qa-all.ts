@@ -27,7 +27,6 @@ console.log("🔍 QA unificado — ejecutando secuencialmente...\n");
 console.log(`Scripts encontrados: ${qaScriptsNames.join(", ")}\n`);
 
 const results: { script: string; passed: boolean }[] = [];
-let failed = false;
 
 for (const scriptName of qaScriptsNames) {
   const scriptCommand = scripts[scriptName];
@@ -40,10 +39,9 @@ for (const scriptName of qaScriptsNames) {
     });
     results.push({ script: scriptName, passed: true });
     console.log(`✓ ${scriptName} PASS\n`);
-  } catch (error) {
+  } catch {
     results.push({ script: scriptName, passed: false });
     console.error(`✗ ${scriptName} FAIL\n`);
-    failed = true;
   }
 }
 

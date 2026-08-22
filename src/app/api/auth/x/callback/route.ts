@@ -41,14 +41,25 @@ export async function GET(request: NextRequest) {
   }
   cookieStore.delete("x_oauth_code_verifier");
 
-  const tokens = await exchangeCodeForTokens({ code, codeVerifier });
-  const { id: xUserId, username: xUsername } = await fetchAuthenticatedXUser(tokens.access_token);
+  // El intercambio y el /users/me van dentro del try: los errores de X traen el
+  // cuerpo crudo de su respuesta y no tienen por qué llegar al navegador. Se
+  // loguean del lado del servidor (sin el code ni el verifier, que ya se
+  // consumieron) y el usuario ve un `?x_error=` genérico.
+  let tokens: Awaited<ReturnType<typeof exchangeCodeForTokens>>;
+  let xUserId: string;
+  let xUsername: string;
+  try {
+    tokens = await exchangeCodeForTokens({ code, codeVerifier });
+    const me = await fetchAuthenticatedXUser(tokens.access_token);
+    xUserId = me.id;
+    xUsername = me.username;
+  } catch (error) {
+    console.error("[x-oauth] falló el callback de X:", (error as Error).message);
+    return NextResponse.redirect(new URL("/conexion?x_error=intercambio", request.url));
+  }
 
   if (!tokens.refresh_token) {
-    return NextResponse.json(
-      { error: "X no devolvio refresh_token, revisa que el scope offline.access este habilitado" },
-      { status: 500 }
-    );
+    return NextResponse.redirect(new URL("/conexion?x_error=sin_refresh", request.url));
   }
 
   const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
