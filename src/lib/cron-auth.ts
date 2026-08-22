@@ -17,8 +17,9 @@ export async function isJobRequestAuthorized(request: Request): Promise<boolean>
 
 // Solo cuenta contra el límite lo que falla: el cron de Vercel y el botón manual
 // nunca caen aquí, así que no hay riesgo de bloquear tráfico legítimo.
-export function unauthorizedJobResponse(request: Request): NextResponse {
-  if (isRateLimited(`job:${requestIp(request)}`)) {
+export async function unauthorizedJobResponse(request: Request): Promise<NextResponse> {
+  const limited = await isRateLimited(`job:${requestIp(request)}`);
+  if (limited) {
     return NextResponse.json({ ok: false, error: "Demasiados intentos" }, { status: 429 });
   }
   return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
@@ -63,7 +64,7 @@ export async function resolveJobRequest(request: Request): Promise<JobRequest> {
   }
 
   const user = await getSessionUser();
-  if (!user) return { ok: false, response: unauthorizedJobResponse(request) };
+  if (!user) return { ok: false, response: await unauthorizedJobResponse(request) };
 
   if (requestedOwner && requestedOwner !== user.userId) {
     return {

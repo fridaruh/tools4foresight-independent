@@ -6,7 +6,7 @@ export const maxDuration = 60;
 
 export async function POST(request: Request) {
   if (!(await isJobRequestAuthorized(request))) {
-    return unauthorizedJobResponse(request);
+    return await unauthorizedJobResponse(request);
   }
   try {
     const summary = await fetchPendingContent();

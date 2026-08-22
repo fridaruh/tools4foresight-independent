@@ -19,7 +19,10 @@ export async function POST(request: Request) {
       .catch(() => null)) as { email?: string } | null;
     const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
 
-    if (isRateLimited(`magic-ip:${ip}`) || (email && isRateLimited(`magic-email:${email}`))) {
+    const ipLimited = await isRateLimited(`magic-ip:${ip}`);
+    const emailLimited = email && (await isRateLimited(`magic-email:${email}`));
+
+    if (ipLimited || emailLimited) {
       return NextResponse.json(
         { message: "Demasiados intentos. Espera unos minutos y vuelve a pedir tu link." },
         { status: 429 },

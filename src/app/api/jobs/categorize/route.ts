@@ -9,7 +9,7 @@ const SAFETY_MARGIN_MS = 30_000;
 
 export async function POST(request: Request) {
   if (!(await isJobRequestAuthorized(request))) {
-    return unauthorizedJobResponse(request);
+    return await unauthorizedJobResponse(request);
   }
 
   const startedAt = Date.now();

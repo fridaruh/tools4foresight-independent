@@ -199,6 +199,16 @@ model PlatformFlag {
   @@map("platform_flags")
 }
 
+// Rate limit distribuido en Postgres (NO es tabla de tenant, no lleva RLS).
+// Se usa con INSERT ... ON CONFLICT para sincronizar entre instancias serverless.
+model RateLimit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @map("window_start")
+
+  @@map("rate_limits")
+}
+
 // --- Tenant: conexión con X ---
 
 model XAuthToken {
