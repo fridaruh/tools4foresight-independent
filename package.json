@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "qa:tenant": "tsx scripts/qa-tenant-isolation.ts",
+    "qa:quota": "tsx scripts/qa-quota.ts",
     "db:app-role": "tsx scripts/setup-app-role.ts"
   },
   "dependencies": {

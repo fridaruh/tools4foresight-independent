@@ -1,40 +1,30 @@
-import { prisma } from "@/lib/prisma";
 import {
   extractContentUrl,
   extractMediaUrls,
   fetchLikedTweetsPage,
   getValidAccessToken,
+  XCreditsDepleted,
+  XRateLimited,
 } from "@/lib/x-client";
 import { tweetIdToDate } from "@/lib/snowflake";
 import { estimateLikedAt } from "@/lib/liked-at";
+import { withOwner, type TenantTx } from "@/lib/tenant-db";
+import { reserveQuota, recordUsage } from "@/lib/quota";
+import { clearXCreditsDepleted, markXCreditsDepleted } from "@/lib/platform-flags";
 import type { Prisma } from "@/generated/prisma/client";
 
-const MAX_PAGES_PER_RUN = 10; // ~1000 likes max por corrida, para no agotar rate limit
+// La transacción de este job hace varias llamadas de red a X (una por página) y
+// una posible segunda transacción anidada para refrescar el token: el timeout
+// default de withOwner (30s) se queda corto. La ruta que lo invoca declara
+// maxDuration = 120; el margen aquí se queda un poco por debajo.
+const TX_TIMEOUT_MS = 100_000;
 
-// Frida pidio explicitamente cobertura de los ultimos 6 meses. El backfill se
-// corta al cruzar esa antiguedad en vez de recorrer el historial completo: cada
-// pagina extra cuesta creditos de X y no aporta nada a lo que se pidio.
-// (El historial mas viejo que ya esta guardado no se toca ni se borra.)
-const BACKFILL_WINDOW_MONTHS = 6;
+export type IngestionStatus = "ok" | "error_credits_depleted" | "error" | "rate_limited";
 
-export type IngestionStatus = "ok" | "error_credits_depleted" | "error";
-
-function backfillCutoff(): Date {
+function backfillCutoff(months: number): Date {
   const cutoff = new Date();
-  cutoff.setMonth(cutoff.getMonth() - BACKFILL_WINDOW_MONTHS);
+  cutoff.setMonth(cutoff.getMonth() - months);
   return cutoff;
-}
-
-function classifyError(error: unknown): { status: IngestionStatus; message: string } {
-  const raw = error instanceof Error ? error.message : String(error);
-  if (raw.includes("credits-depleted") || raw.includes("credits depleted") || raw.includes("(402)")) {
-    return {
-      status: "error_credits_depleted",
-      message:
-        "Tu cuenta de X se quedo sin creditos (pay-per-use). Recarga saldo en el Developer Portal (Billing/Usage) para que la ingesta pueda seguir.",
-    };
-  }
-  return { status: "error", message: raw };
 }
 
 type CollectedTweet = {
@@ -42,11 +32,38 @@ type CollectedTweet = {
   tweetCreatedAt: Date | null;
 };
 
-async function runIngestion(ownerId: string) {
-  // TODO(fase3): mover estas lecturas dentro de withOwner() y quitar los filtros
-  // manuales; por ahora RLS ya acota lo que se ve, pero cada query lo repite.
-  const cursor = await prisma.ingestionCursor.findUnique({ where: { userId: ownerId } });
+type RunOutcome =
+  | { status: "disabled" }
+  | {
+      status: IngestionStatus;
+      error?: string;
+      tweetsSeen: number;
+      liked_items_created: number;
+      pagesFetched: number;
+      stoppedOnKnownTweet: boolean;
+      reachedEndOfHistory: boolean;
+      reachedWindow: boolean;
+      backfillComplete: boolean;
+      stoppedOnBudget: boolean;
+    };
+
+async function runIngestion(ownerId: string, tx: TenantTx): Promise<RunOutcome> {
+  const quota = await tx.userQuota.findUnique({ where: { userId: ownerId } });
+  if (!quota || !quota.pipelineEnabled) {
+    return { status: "disabled" };
+  }
+
+  const cursor = await tx.ingestionCursor.findUnique({ where: { userId: ownerId } });
   const { xUserId, accessToken } = await getValidAccessToken(ownerId);
+
+  // Backfill "pendiente" = todavía no llegamos ni una vez a la ventana de
+  // BACKFILL_WINDOW_MONTHS (cursor.backfillReachedWindow sigue en false).
+  // Mientras eso sea cierto, la corrida gasta el cupo de backfill (más
+  // páginas); en cuanto se cruza la ventana una vez, backfillReachedWindow
+  // queda en true para siempre y las corridas siguientes son incrementales
+  // con el cupo diario, más chico.
+  const backfillPending = !(cursor?.backfillReachedWindow ?? false);
+  const maxPages = backfillPending ? quota.xBackfillPages : quota.xPagesPerDay;
 
   // Si venimos de un backfill cortado a la mitad, retomamos desde ese pagination_token
   // y mantenemos el tweet_id "pendiente" que se fijara como cursor solo al terminar el ciclo.
@@ -55,17 +72,55 @@ async function runIngestion(ownerId: string) {
   let paginationToken = cursor?.resumePaginationToken ?? undefined;
   let pendingNewestTweetId = cursor?.pendingNewestTweetId ?? undefined;
   const stopAtTweetId = cursor?.lastTweetId ?? undefined;
-  const cutoff = backfillCutoff();
+  const cutoff = backfillCutoff(quota.xBackfillMonths);
 
   const collected: CollectedTweet[] = [];
   let pagesFetched = 0;
   let stoppedOnKnownTweet = false;
   let reachedEndOfHistory = false;
   let reachedWindow = false;
+  let stoppedOnBudget = false;
 
-  outer: while (pagesFetched < MAX_PAGES_PER_RUN) {
-    const page = await fetchLikedTweetsPage({ xUserId, accessToken, paginationToken });
+  let runStatus: IngestionStatus = "ok";
+  let runError: string | undefined;
+  let retryAfter: Date | undefined;
+
+  outer: while (pagesFetched < maxPages) {
+    // Se reserva ANTES de gastar la llamada a X: si no hay cupo, se corta acá
+    // sin pedirle nada a X, no después de haber pagado el costo.
+    const reserved = await reserveQuota(tx, ownerId, "x_pages", 1);
+    if (!reserved) {
+      stoppedOnBudget = true;
+      break;
+    }
+
+    let page;
+    try {
+      page = await fetchLikedTweetsPage({ xUserId, accessToken, paginationToken });
+    } catch (error) {
+      if (error instanceof XRateLimited) {
+        runStatus = "rate_limited";
+        runError = error.message;
+        retryAfter = error.resetAt;
+        break;
+      }
+      if (error instanceof XCreditsDepleted) {
+        runStatus = "error_credits_depleted";
+        runError = error.message;
+        // Global: la X App compartida se quedó sin saldo, no es un problema
+        // de este tenant en particular.
+        await markXCreditsDepleted();
+        break;
+      }
+      // Error de verdad (red, 5xx, etc.): se deja propagar. Al venir de dentro
+      // de la transacción de withOwner(), todo lo escrito en esta corrida
+      // (incluida la reserva de cupo de esta página) se revierte, y el catch
+      // de ingestLikes() registra el fallo en una transacción nueva.
+      throw error;
+    }
+
     pagesFetched++;
+    await recordUsage(tx, ownerId, "x_page", 1);
 
     for (const tweet of page.tweets) {
       if (stopAtTweetId && tweet.id === stopAtTweetId) {
@@ -79,7 +134,7 @@ async function runIngestion(ownerId: string) {
       const tweetCreatedAt = tweetIdToDate(tweet.id) ?? (tweet.created_at ? new Date(tweet.created_at) : null);
 
       // El orden de likes es descendente, asi que en cuanto un tweet cae fuera de
-      // la ventana de 6 meses todo lo que sigue tambien lo hace. Se corta el ciclo.
+      // la ventana configurada todo lo que sigue tambien lo hace. Se corta el ciclo.
       if (tweetCreatedAt && tweetCreatedAt < cutoff) {
         reachedWindow = true;
         break outer;
@@ -126,7 +181,7 @@ async function runIngestion(ownerId: string) {
   let windowEnd = new Date();
 
   if (isResumingBackfill) {
-    const oldest = await prisma.likedItem.findFirst({
+    const oldest = await tx.likedItem.findFirst({
       where: { ownerId },
       orderBy: { likedAt: "asc" },
       select: { likedAt: true },
@@ -154,7 +209,7 @@ async function runIngestion(ownerId: string) {
 
   let created = 0;
   if (batch.length > 0) {
-    const result = await prisma.likedItem.createMany({ data: batch, skipDuplicates: true });
+    const result = await tx.likedItem.createMany({ data: batch, skipDuplicates: true });
     created = result.count;
   }
 
@@ -165,8 +220,9 @@ async function runIngestion(ownerId: string) {
 
   const cursorState = {
     lastRunAt: new Date(),
-    lastStatus: "ok",
-    lastError: null,
+    lastStatus: runStatus,
+    lastError: runError ?? null,
+    retryAfter: retryAfter ?? null,
     lastTweetId: cycleComplete ? (pendingNewestTweetId ?? stopAtTweetId) : stopAtTweetId,
     pendingNewestTweetId: cycleComplete ? null : pendingNewestTweetId,
     resumePaginationToken: cycleComplete ? null : paginationToken,
@@ -175,7 +231,7 @@ async function runIngestion(ownerId: string) {
     minLikeRank: rankLo === null ? cursor?.minLikeRank : Math.min(rankLo, cursor?.minLikeRank ?? rankLo),
   };
 
-  await prisma.ingestionCursor.upsert({
+  await tx.ingestionCursor.upsert({
     where: { userId: ownerId },
     update: cursorState,
     create: {
@@ -184,10 +240,19 @@ async function runIngestion(ownerId: string) {
       lastTweetId: cursorState.lastTweetId ?? undefined,
       pendingNewestTweetId: cursorState.pendingNewestTweetId ?? undefined,
       resumePaginationToken: cursorState.resumePaginationToken ?? undefined,
+      retryAfter: cursorState.retryAfter ?? undefined,
     },
   });
 
+  // Una corrida OK es la señal de que la X App volvió a tener saldo (si el
+  // flag global seguía prendido de un 402 anterior, se apaga acá).
+  if (runStatus === "ok") {
+    await clearXCreditsDepleted();
+  }
+
   return {
+    status: runStatus,
+    ...(runError ? { error: runError } : {}),
     tweetsSeen: batch.length,
     liked_items_created: created,
     pagesFetched,
@@ -195,28 +260,41 @@ async function runIngestion(ownerId: string) {
     reachedEndOfHistory,
     reachedWindow,
     backfillComplete: cycleComplete,
+    stoppedOnBudget,
   };
 }
 
 async function recordFailure(ownerId: string, error: unknown) {
-  const { status, message } = classifyError(error);
-  await prisma.ingestionCursor.upsert({
-    where: { userId: ownerId },
-    update: { lastRunAt: new Date(), lastStatus: status, lastError: message },
-    create: { userId: ownerId, lastRunAt: new Date(), lastStatus: status, lastError: message },
-  });
-  return { status, message };
+  const message = error instanceof Error ? error.message : String(error);
+  await withOwner(ownerId, (tx) =>
+    tx.ingestionCursor.upsert({
+      where: { userId: ownerId },
+      update: { lastRunAt: new Date(), lastStatus: "error", lastError: message },
+      create: { userId: ownerId, lastRunAt: new Date(), lastStatus: "error", lastError: message },
+    }),
+  );
+  return { status: "error" as const, message };
 }
 
 /**
  * Ingesta los likes de X de UN tenant. `ownerId` es obligatorio: no existe una
- * ingesta "global".
- * TODO(fase2.4): el tope de paginas sale de UserQuota, no de la constante de arriba.
+ * ingesta "global". Toda la corrida —lectura de cuota, lectura/escritura del
+ * cursor, reserva de cupo, creación de items— pasa por una única transacción
+ * de `withOwner(ownerId, ...)`.
  */
 export async function ingestLikes(ownerId: string) {
   try {
-    const summary = await runIngestion(ownerId);
-    return { ok: true as const, ...summary };
+    const outcome = await withOwner(ownerId, (tx) => runIngestion(ownerId, tx), {
+      timeoutMs: TX_TIMEOUT_MS,
+    });
+
+    if (outcome.status === "disabled") {
+      return outcome;
+    }
+
+    // "ok", "rate_limited" y "error_credits_depleted" son resultados manejados
+    // sin excepción: el job no crasheó, solo se topó con un límite esperado.
+    return { ok: true as const, ...outcome };
   } catch (error) {
     const { status, message } = await recordFailure(ownerId, error);
     return { ok: false as const, errorType: status, error: message };

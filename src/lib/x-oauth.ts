@@ -1,3 +1,5 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+
 export const X_AUTHORIZE_URL = "https://x.com/i/oauth2/authorize";
 export const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
 export const X_ME_URL = "https://api.x.com/2/users/me";
@@ -10,6 +12,75 @@ function getEnv(name: string): string {
     throw new Error(`Falta la variable de entorno ${name}`);
   }
   return value;
+}
+
+// --- state firmado (fase 2.1) ---------------------------------------------
+//
+// El `state` de OAuth ya no es un valor aleatorio que se compara contra una
+// cookie: lleva el userId de la sesión que inició el flujo, firmado con
+// HMAC-SHA256(AUTH_SECRET). El callback verifica la firma y que el userId
+// coincida con la sesión actual, así que aunque alguien reutilice o intercepte
+// un `state` viejo no puede colarlo en la cuenta de otro usuario. `ts` acota la
+// validez a 10 minutos, lo mismo que la cookie del code_verifier.
+
+const STATE_MAX_AGE_MS = 10 * 60 * 1000;
+
+type OAuthStatePayload = {
+  userId: string;
+  nonce: string;
+  ts: number;
+};
+
+function base64url(input: Buffer): string {
+  return input.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function base64urlDecode(input: string): Buffer {
+  const padded = input.replace(/-/g, "+").replace(/_/g, "/");
+  return Buffer.from(padded, "base64");
+}
+
+function signPayload(payloadB64: string): string {
+  const sig = createHmac("sha256", getEnv("AUTH_SECRET")).update(payloadB64).digest();
+  return base64url(sig);
+}
+
+/** Firma un `state` ligado a `userId`: solo la sesión que lo generó lo puede usar. */
+export function signOAuthState(userId: string): string {
+  const payload: OAuthStatePayload = {
+    userId,
+    nonce: randomBytes(16).toString("hex"),
+    ts: Date.now(),
+  };
+  const payloadB64 = base64url(Buffer.from(JSON.stringify(payload)));
+  return `${payloadB64}.${signPayload(payloadB64)}`;
+}
+
+/**
+ * Verifica que `state` esté firmado por esta app, no tenga más de 10 minutos y
+ * pertenezca a `expectedUserId` (el usuario de la sesión actual del callback).
+ */
+export function verifyOAuthState(state: string, expectedUserId: string): boolean {
+  const [payloadB64, sigB64] = state.split(".");
+  if (!payloadB64 || !sigB64) return false;
+
+  const expectedSig = base64urlDecode(signPayload(payloadB64));
+  const actualSig = base64urlDecode(sigB64);
+  if (expectedSig.length !== actualSig.length || !timingSafeEqual(expectedSig, actualSig)) {
+    return false;
+  }
+
+  let payload: OAuthStatePayload;
+  try {
+    payload = JSON.parse(base64urlDecode(payloadB64).toString("utf8"));
+  } catch {
+    return false;
+  }
+
+  if (payload.userId !== expectedUserId) return false;
+  if (Date.now() - payload.ts > STATE_MAX_AGE_MS) return false;
+
+  return true;
 }
 
 function basicAuthHeader(): string {
