@@ -181,6 +181,13 @@ body {
   --section-label: "USUARIOS";
 }
 
+/* Panel de plataforma (PLAN Fase 5.1): solo platform_admin lo ve, entra al final
+   de la nav como 07 — Sistema (06) sigue siendo el ultimo tab de cualquier tenant. */
+[data-section="admin"] {
+  --section-index: "07";
+  --section-label: "ADMIN";
+}
+
 /* Secciones del member: su nav numera aparte (01 Categorías, 02 Señales). */
 [data-section="explora"] {
   --section-index: "01";

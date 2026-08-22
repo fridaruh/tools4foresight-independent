@@ -19,6 +19,11 @@ const SECTIONS = [
   { href: "/conexion", label: "Sistema", index: "06", section: "conexion" },
 ];
 
+// Solo platform_admin (Frida): panel de operación de la plataforma (PLAN Fase 5).
+// No es una seccion de tenant, asi que va aparte de SECTIONS y se agrega al final
+// solo para ese rol.
+const ADMIN_SECTION = { href: "/admin", label: "Admin", index: "07", section: "admin" };
+
 export function TopNav({
   role,
   user,
@@ -30,7 +35,7 @@ export function TopNav({
   const pathname = usePathname();
   // Sin sesion (p.ej. en /login) no hay nada que navegar todavia: solo el logo.
   // Con sesion, todos ven las mismas secciones: cada quien sobre su propio banco.
-  const sections = role !== null ? SECTIONS : [];
+  const sections = role === "platform_admin" ? [...SECTIONS, ADMIN_SECTION] : role !== null ? SECTIONS : [];
 
   return (
     <header className="sticky top-0 z-30 border-b border-ink bg-canvas/90 backdrop-blur">

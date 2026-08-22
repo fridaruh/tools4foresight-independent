@@ -18,6 +18,7 @@
  */
 import { withOwner } from "@/lib/tenant-db";
 import { JOBS } from "@/lib/jobs/registry";
+import { sendAdminAlert } from "@/lib/alerts";
 import type { JobContext, JobName, JobResult } from "@/lib/jobs/types";
 
 /**
@@ -128,7 +129,50 @@ export async function runJob(
     console.error(`[runner] no se pudo cerrar job_run ${run.id} (${name}):`, error);
   }
 
+  if (statusFor(result) === "error") {
+    // No debe poder tumbar la corrida ni retrasar la respuesta al caller por un
+    // problema de email: se dispara y se loguea aparte.
+    await alertOnConsecutiveFailures(ownerId, name).catch((error) => {
+      console.error(`[runner] no se pudo evaluar fallas consecutivas de ${name} para ${ownerId}:`, error);
+    });
+  }
+
   return { ...result, job: name, runId: run.id, elapsedMs: Date.now() - startedAt };
+}
+
+/** Cuántas corridas seguidas en error del mismo job/tenant disparan la alerta (PLAN 5.2b). */
+const CONSECUTIVE_FAILURES_THRESHOLD = 5;
+
+/**
+ * Si las últimas `CONSECUTIVE_FAILURES_THRESHOLD` corridas de `job` para
+ * `ownerId` son todas `error`, avisa a Frida. Dedupe de `sendAdminAlert` por
+ * `job`+`ownerId`: no vuelve a mandar el mismo aviso mientras el tenant siga
+ * fallando dentro de la ventana de 24 h, aunque cada corrida nueva siga
+ * cumpliendo la condición.
+ */
+async function alertOnConsecutiveFailures(ownerId: string, job: JobName): Promise<void> {
+  const { lastRuns, email } = await withOwner(ownerId, async (tx) => {
+    const [lastRuns, user] = await Promise.all([
+      tx.jobRun.findMany({
+        where: { ownerId, job },
+        orderBy: { startedAt: "desc" },
+        take: CONSECUTIVE_FAILURES_THRESHOLD,
+        select: { status: true },
+      }),
+      tx.user.findFirst({ where: { id: ownerId }, select: { email: true } }),
+    ]);
+    return { lastRuns, email: user?.email ?? ownerId };
+  });
+
+  const allFailed =
+    lastRuns.length === CONSECUTIVE_FAILURES_THRESHOLD && lastRuns.every((r) => r.status === "error");
+  if (!allFailed) return;
+
+  await sendAdminAlert(
+    `job_failures:${job}:${ownerId}`,
+    `Tenant ${email} lleva ${CONSECUTIVE_FAILURES_THRESHOLD} corridas fallidas de ${job}`,
+    `Las últimas ${CONSECUTIVE_FAILURES_THRESHOLD} corridas del job "${job}" para el tenant ${email} (${ownerId}) terminaron en error. Revisa /admin y los últimos JobRun en su /conexion.`,
+  );
 }
 
 // ---------------------------------------------------------------------------
