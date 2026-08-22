@@ -71,30 +71,22 @@ Cada pantalla lleva `data-section="..."` en su contenedor. Ahí se definen
 una pantalla es agregar el bloque en `globals.css` y la entrada en la lista de secciones
 de `TopNav`; ninguna página repite ese markup.
 
-Hay dos navegaciones según el rol (`TopNav` recibe el rol y elige la lista), así que la
-numeración se reinicia entre ambas:
+**Navegación** (orden de aparición en TopNav):
 
-**Admin** (`ADMIN_SECTIONS`):
+| Sección | Ruta | `data-section` |
+|---|---|---|
+| Catálogo | `/` | `likes` |
+| Análisis | `/enrich` | `enrich` |
+| Grafo | `/grafo` | `grafo` |
+| Horizontes | `/horizontes` | `horizontes` |
+| Categorías | `/categorias` | `categorias` |
+| Sistema | `/conexion` | `conexion` |
+| Admin | `/admin` | `admin` |
 
-| Sección | Ruta | Índice | `data-section` |
-|---|---|---|---|
-| Catálogo | `/` | 01 | `likes` |
-| Análisis | `/enrich` | 02 | `enrich` |
-| Taxonomía | `/categorias` | 03 | `categorias` |
-| Sistema | `/conexion` | 04 | `conexion` |
-| Usuarios | `/usuarios` | 05 | `usuarios` |
-
-**Member** (`MEMBER_SECTIONS`):
-
-| Sección | Ruta | Índice | `data-section` |
-|---|---|---|---|
-| Categorías | `/categorias` | 01 | `explora` |
-| Señales | `/senales` | 02 | `senales` |
-
-En la esquina derecha de la nav van el botón de sincronizar (solo admin) y el círculo de
+En la esquina derecha de la nav van el botón de sincronizar (solo usuarios conectados) y el círculo de
 cuenta (`UserMenu`: inicial del nombre, borde negro que pasa a naranja en hover/abierto,
 desplegable con "Mi perfil" y "Cerrar sesión"). Sin sesión de usuario se muestra el botón
-de salir del gate legacy.
+de entrar.
 
 ## Geometría
 

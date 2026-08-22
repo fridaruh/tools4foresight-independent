@@ -1,0 +1,73 @@
+name: QA
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  qa:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_db
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup test database
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+          DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+        run: |
+          npm run db:app-role 2>/dev/null || true
+          npx prisma generate
+          npx prisma migrate deploy
+
+      - name: Generate Prisma types
+        run: npx prisma generate
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Run QA
+        env:
+          DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+          DIRECT_URL: "postgresql://postgres:postgres@localhost:5432/test_db"
+          # Dummy values for optional env vars
+          X_OAUTH_CLIENT_ID: "test"
+          X_OAUTH_CLIENT_SECRET: "test"
+          TOKEN_ENCRYPTION_KEY: "dGVzdHRlc3R0ZXN0dGVzdHRlc3R0ZXN0dA=="
+          OLLAMA_API_KEY: "test"
+          OPENAI_API_KEY: "test"
+          AUTH_SECRET: "test"
+          RESEND_API_KEY: "test"
+          CRON_SECRET: "test"
+          NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+        run: npm run qa

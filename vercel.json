@@ -5,6 +5,7 @@
     { "path": "/api/jobs/categorize", "schedule": "0 7 * * *" },
     { "path": "/api/jobs/analyze", "schedule": "30 7 * * *" },
     { "path": "/api/jobs/embed", "schedule": "0 8 * * *" },
-    { "path": "/api/jobs/graph", "schedule": "30 8 * * *" }
+    { "path": "/api/jobs/graph", "schedule": "30 8 * * *" },
+    { "path": "/api/jobs/alerts", "schedule": "0 9 * * *" }
   ]
 }
