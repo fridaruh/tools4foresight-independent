@@ -28,6 +28,7 @@ const JOB_LABELS: Record<string, string> = {
   analyze: "Análisis",
   embed: "Embeddings",
   graph: "Grafo",
+  tags: "Etiquetas",
 };
 
 const RUN_STATUS_LABELS: Record<string, string> = {
@@ -231,6 +232,7 @@ export default async function ConexionPage({
         <div className="flex flex-wrap gap-3">
           <RunJobButton path="/api/sync" label="Correr mi pipeline" />
           <RunJobButton path="/api/jobs/graph/now" label="Recalcular grafo" />
+          <RunJobButton path="/api/jobs/tags/run" label="Generar etiquetas" />
         </div>
       </section>
 

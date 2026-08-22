@@ -344,6 +344,14 @@ model LikedItem {
   pestel       String[] @default([])
   pestelSource String   @default("auto") @map("pestel_source") // auto | manual
 
+  // Etiquetas libres (3 a 5), descriptivas del contenido, generadas por Ollama.
+  // A diferencia de `category` (una sola, catálogo cerrado por tenant) y `pestel`
+  // (catálogo fijo), estas son texto libre — no hay tabla de catálogo detrás.
+  // 'manual' congela el valor igual que category/pestel.
+  tags            String[]  @default([])
+  tagsSource      String    @default("auto") @map("tags_source") // auto | manual
+  tagsGeneratedAt DateTime? @map("tags_generated_at")
+
   // Textos generados. `*Source = 'manual'` congela el texto: el job no lo pisa.
   tldr            String?
   tldrSource      String    @default("auto") @map("tldr_source")

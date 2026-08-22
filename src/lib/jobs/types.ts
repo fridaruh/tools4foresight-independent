@@ -16,7 +16,8 @@ export type JobName =
   | "categorize"
   | "analyze"
   | "embed"
-  | "graph";
+  | "graph"
+  | "tags";
 
 export const JOB_NAMES: readonly JobName[] = [
   "ingest",
@@ -25,6 +26,7 @@ export const JOB_NAMES: readonly JobName[] = [
   "analyze",
   "embed",
   "graph",
+  "tags",
 ] as const;
 
 export type JobContext = {

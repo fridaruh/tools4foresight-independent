@@ -27,6 +27,7 @@ import { runPestel } from "@/lib/jobs/pestel";
 import { runAnalyze } from "@/lib/jobs/analyze";
 import { runEmbed } from "@/lib/jobs/embed";
 import { runGraph } from "@/lib/jobs/graph";
+import { runTags } from "@/lib/jobs/tags";
 
 /** Margen que se le deja a la corrida para cerrar antes de que la corten. */
 const PESTEL_SAFETY_MARGIN_MS = 30_000;
@@ -170,4 +171,5 @@ export const JOBS: Record<JobName, JobFn> = {
   analyze: runAnalyze,
   embed: runEmbed,
   graph: graphWithDebounce,
+  tags: runTags,
 };
