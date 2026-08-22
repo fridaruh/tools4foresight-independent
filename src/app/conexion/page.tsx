@@ -4,6 +4,7 @@ import { RetryFetchButton } from "@/components/RetryFetchButton";
 import { RunJobButton } from "@/components/RunJobButton";
 import { DisconnectXButton } from "@/components/DisconnectXButton";
 import { AnthropicKeyForm } from "@/components/AnthropicKeyForm";
+import { CsvLinksForm } from "@/components/CsvLinksForm";
 import { PipelineToggle } from "@/components/PipelineToggle";
 import { AnalysisPromptsEditor } from "@/components/AnalysisPromptsEditor";
 import { getPromptOverrides, PROMPT_DEFAULTS } from "@/lib/analysis-prompts";
@@ -232,6 +233,8 @@ export default async function ConexionPage({
           <RunJobButton path="/api/jobs/graph/now" label="Recalcular grafo" />
         </div>
       </section>
+
+      <CsvLinksForm />
 
       <section className="flex flex-col gap-3">
         <h2 className="section-heading text-ink">Prompts del análisis</h2>
