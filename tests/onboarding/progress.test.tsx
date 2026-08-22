@@ -49,15 +49,15 @@ describe("isTaskDone", () => {
   it("sin facts ni estado, todo está pendiente", async () => {
     setup();
     await waitFor(() => expect(txt("ready")).toBe("true"));
-    expect(txt("progress")).toBe("0/14");
+    expect(txt("progress")).toBe("0/13");
   });
 
   it("las acciones con fact se dan por hechas desde los datos reales", async () => {
-    setup(facts({ xConnected: true, hasAnthropicKey: true, itemCount: 3 }));
+    setup(facts({ xConnected: true, itemCount: 3 }));
     await waitFor(() => expect(txt("ready")).toBe("true"));
 
-    // sistema:action + sistema:action-key + catalogo:action
-    expect(txt("progress")).toBe("3/14");
+    // sistema:action + catalogo:action
+    expect(txt("progress")).toBe("2/13");
     expect(txt("x")).toBe("true");
     expect(txt("grafo")).toBe("false");
     expect(txt("x-verified")).toBe("true");
@@ -66,12 +66,12 @@ describe("isTaskDone", () => {
   it("un conteo cuenta como hecho solo si es mayor que cero", async () => {
     setup(facts({ publishedCount: 0 }));
     await waitFor(() => expect(txt("ready")).toBe("true"));
-    expect(txt("progress")).toBe("0/14");
+    expect(txt("progress")).toBe("0/13");
 
     cleanup();
     setup(facts({ publishedCount: 1 }));
     await waitFor(() => expect(txt("ready")).toBe("true"));
-    expect(txt("progress")).toBe("1/14");
+    expect(txt("progress")).toBe("1/13");
   });
 
   it("las acciones manuales sí se marcan a mano, las verificadas no", async () => {
@@ -81,12 +81,12 @@ describe("isTaskDone", () => {
     act(() => screen.getByText("manual").click());
     expect(txt("cats")).toBe("true");
     expect(txt("cats-verified")).toBe("false");
-    expect(txt("progress")).toBe("1/14");
+    expect(txt("progress")).toBe("1/13");
 
     // Marcar a mano una tarea verificable no la mueve: manda la base.
     act(() => screen.getByText("verificada").click());
     expect(txt("x")).toBe("false");
-    expect(txt("progress")).toBe("1/14");
+    expect(txt("progress")).toBe("1/13");
   });
 
   it("tour e introducciones salen del estado local", async () => {
@@ -98,6 +98,6 @@ describe("isTaskDone", () => {
 
     act(() => screen.getByText("intro").click());
     expect(txt("intro")).toBe("true");
-    expect(txt("progress")).toBe("2/14");
+    expect(txt("progress")).toBe("2/13");
   });
 });

@@ -1,10 +1,9 @@
-// Job de análisis (PLAN 3.6): tldr → impacto → "por qué importa" en Ollama, y
-// foresight en Claude (BYOK) si el tenant tiene key verificada.
+// Job de análisis (PLAN 3.6): tldr → impacto → "por qué importa", todo en Ollama.
 //
 // Patrón de transacciones cortas, igual que fetch/categorize/pestel: se lee el lote
-// y los prompts del tenant en un `withOwner` breve, cada llamada a Ollama/Claude
-// (hasta 90s) corre FUERA de cualquier transacción, y cada escritura vuelve a abrir
-// su propio `withOwner` corto. Ver la nota sobre el pooler de Neon en tenant-db.ts.
+// y los prompts del tenant en un `withOwner` breve, cada llamada a Ollama (hasta
+// 90s) corre FUERA de cualquier transacción, y cada escritura vuelve a abrir su
+// propio `withOwner` corto. Ver la nota sobre el pooler de Neon en tenant-db.ts.
 import {
   ANALYSIS_TIMEOUT_MS,
   generateImpact,
@@ -13,8 +12,6 @@ import {
   type AnalysisInput,
 } from "@/lib/analyze";
 import { getAnalysisSystemPrompts } from "@/lib/analysis-prompts";
-import { hasVerifiedAnthropicKey } from "@/lib/anthropic-client";
-import { generateForesight } from "@/lib/foresight";
 import { budgetExceeded, type JobFn } from "@/lib/jobs/types";
 import { recordUsage, reserveQuota } from "@/lib/quota";
 import { withOwner } from "@/lib/tenant-db";
@@ -37,22 +34,19 @@ type WindowItem = AnalysisInput & {
   impactSource: string;
   whyMatters: string | null;
   whyMattersSource: string;
-  foresight: string | null;
-  foresightSource: string;
 };
 
 function needsWork(item: WindowItem): boolean {
   return (
     (item.tldr === null && item.tldrSource !== "manual") ||
     (item.impact === null && item.impactSource !== "manual") ||
-    (item.whyMatters === null && item.whyMattersSource !== "manual") ||
-    (item.foresight === null && item.foresightSource !== "manual")
+    (item.whyMatters === null && item.whyMattersSource !== "manual")
   );
 }
 
 /**
- * Genera tldr/impacto/"por que importa"/foresight de los likes mas recientes que aun
- * no los tienen.
+ * Genera tldr/impacto/"por que importa" de los likes mas recientes que aun no los
+ * tienen.
  *
  * Es incremental a proposito: 600 items son varios cientos de llamadas al modelo y no
  * caben en una sola corrida, asi que cada una avanza lo que puede (budget de tiempo,
@@ -80,8 +74,6 @@ export const runAnalyze: JobFn = async (ctx) => {
         impactSource: true,
         whyMatters: true,
         whyMattersSource: true,
-        foresight: true,
-        foresightSource: true,
       },
     });
     return { prompts, window };
@@ -99,15 +91,9 @@ export const runAnalyze: JobFn = async (ctx) => {
     };
   }
 
-  // Se resuelve una sola vez por corrida: cada item vuelve a chequear esta bandera
-  // en vez de llamar hasVerifiedAnthropicKey por item.
-  const canForesight = await hasVerifiedAnthropicKey(ctx.ownerId);
-  let foresightSkipped = false;
-
   let tldrs = 0;
   let impacts = 0;
   let whyMattersCount = 0;
-  let foresightsCount = 0;
   let attempted = 0;
   let stoppedOnBudget = false;
   let stoppedOnQuota = false;
@@ -191,37 +177,6 @@ export const runAnalyze: JobFn = async (ctx) => {
         );
         if (written.count > 0) whyMattersCount += 1;
       }
-
-      // Foresight cierra la cadena: parte del tldr y del "por que importa" (recien
-      // generados o ya guardados). Corre en Claude, solo si hay key BYOK verificada.
-      if (item.foresight === null && item.foresightSource !== "manual") {
-        if (!canForesight) {
-          foresightSkipped = true;
-        } else if (tldr !== null && whyMatters !== null) {
-          const foresight = await generateForesight(ctx.ownerId, { tldr, whyMatters }, prompts.foresight);
-          // null = sin key valida (revocada a medio job), refusal, o key sin
-          // verificar: el item queda pendiente para la proxima corrida o para
-          // reintento manual, sin contar como error.
-          if (foresight !== null) {
-            const written = await withOwner(ctx.ownerId, (tx) =>
-              tx.likedItem.updateMany({
-                where: {
-                  id: item.id,
-                  ownerId: ctx.ownerId,
-                  foresight: null,
-                  foresightSource: { not: "manual" },
-                },
-                data: {
-                  foresight,
-                  foresightSource: "auto",
-                  foresightGeneratedAt: new Date(),
-                },
-              }),
-            );
-            if (written.count > 0) foresightsCount += 1;
-          }
-        }
-      }
     } catch (error) {
       // Un item que falla no debe tumbar la corrida: se queda pendiente y entra en la
       // siguiente.
@@ -245,7 +200,7 @@ export const runAnalyze: JobFn = async (ctx) => {
   return {
     // Falla la corrida solo si no se logro escribir nada: si algo paso, la corrida
     // sirvio y el resto se reintenta en la siguiente.
-    ok: tldrs + impacts + whyMattersCount + foresightsCount > 0 || errors.length === 0,
+    ok: tldrs + impacts + whyMattersCount > 0 || errors.length === 0,
     processed: attempted,
     remaining,
     stoppedOnBudget,
@@ -255,8 +210,6 @@ export const runAnalyze: JobFn = async (ctx) => {
       tldrs,
       impacts,
       whyMatters: whyMattersCount,
-      foresights: foresightsCount,
-      foresightSkipped,
       ...(errors.length > 0 ? { errors: errors.slice(0, 5) } : {}),
     },
   };

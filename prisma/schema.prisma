@@ -38,7 +38,6 @@ model User {
   // Tenant: todo lo de abajo muere con el usuario (borrar cuenta = borrar banco).
   xAuthToken            XAuthToken?
   ingestionCursor       IngestionCursor?
-  secrets               UserSecret[]
   quota                 UserQuota?
   usageEvents           UsageEvent[]
   categories            Category[]
@@ -103,30 +102,7 @@ model Verification {
   @@map("verifications")
 }
 
-// --- Tenant: secretos, cuotas y uso ---
-
-// BYOK. Hoy solo `provider = "anthropic"` (foresight), pero la tabla admite más.
-// `encrypted` guarda el blob con versión de clave (v1.<iv>.<tag>.<ct>), nunca la
-// key en claro. `last4` es lo único que se muestra en la UI.
-model UserSecret {
-  userId     String    @map("user_id")
-  provider   String
-  encrypted  String
-  last4      String
-  // Modelo elegido por el usuario para esa key (p.ej. "claude-sonnet-5").
-  // Null = el default del código.
-  model      String?
-  // Null = sin verificar o key rechazada (401). El job de foresight se salta al
-  // tenant sin key verificada, sin error.
-  verifiedAt DateTime? @map("verified_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@id([userId, provider])
-  @@map("user_secrets")
-}
+// --- Tenant: cuotas y uso ---
 
 // Límites y contadores por tenant. Los contadores se reinician cuando
 // `windowResetAt` queda en el pasado (ver src/lib/quota.ts, Fase 2).
@@ -161,7 +137,7 @@ model UserQuota {
 model UsageEvent {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
-  // x_page | ollama_call | anthropic_call | openai_embed | fetch
+  // x_page | ollama_call | openai_embed | fetch
   kind      String
   units     Int
   tokensIn  Int?     @map("tokens_in")
@@ -364,11 +340,6 @@ model LikedItem {
   whyMatters            String?   @map("why_matters")
   whyMattersSource      String    @default("auto") @map("why_matters_source")
   whyMattersGeneratedAt DateTime? @map("why_matters_generated_at")
-
-  // Foresight: lo escribe Claude con la API key DEL USUARIO (BYOK, PLAN 3.7).
-  foresight            String?
-  foresightSource      String    @default("auto") @map("foresight_source")
-  foresightGeneratedAt DateTime? @map("foresight_generated_at")
 
   // Descartado de la tabla de enriquecimiento, NO del catálogo.
   enrichDiscarded Boolean @default(false) @map("enrich_discarded")

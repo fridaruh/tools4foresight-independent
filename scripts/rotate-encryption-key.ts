@@ -4,7 +4,6 @@
  *
  * Re-cifra TODO lo que guarda secretos por tenant:
  *   - `x_auth_tokens.access_token` y `.refresh_token` (OAuth de X)
- *   - `user_secrets.encrypted`      (BYOK de Anthropic)
  *
  * Cómo se usa (el orden importa: si se promueve la clave antes de re-cifrar,
  * los tokens quedan ilegibles y todo el mundo tiene que reconectar X):
@@ -104,48 +103,6 @@ async function rotateXAuthTokens(key: Buffer, dryRun: boolean): Promise<Stats> {
   return stats;
 }
 
-async function rotateUserSecrets(key: Buffer, dryRun: boolean): Promise<Stats> {
-  const stats = emptyStats();
-
-  // La PK de user_secrets es compuesta (user_id, provider); se pagina por
-  // user_id, que es lo único ordenable de forma estable aquí.
-  let cursorUserId = "";
-
-  for (;;) {
-    const rows = await withPlatformBypass((tx) =>
-      tx.userSecret.findMany({
-        take: PAGE_SIZE,
-        where: cursorUserId ? { userId: { gt: cursorUserId } } : undefined,
-        orderBy: { userId: "asc" },
-        select: { userId: true, provider: true, encrypted: true },
-      }),
-    );
-    if (rows.length === 0) break;
-    cursorUserId = rows[rows.length - 1].userId;
-
-    for (const row of rows) {
-      stats.scanned += 1;
-      try {
-        const encrypted = reencrypt(row.encrypted, key);
-        if (!dryRun) {
-          await withPlatformBypass((tx) =>
-            tx.userSecret.updateMany({
-              where: { userId: row.userId, provider: row.provider },
-              data: { encrypted },
-            }),
-          );
-        }
-        stats.rotated += 1;
-      } catch (error) {
-        stats.failed += 1;
-        console.error(`[user_secrets] ${row.userId}/${row.provider}: ${(error as Error).message}`);
-      }
-    }
-  }
-
-  return stats;
-}
-
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const key = targetKey();
@@ -159,10 +116,7 @@ async function main() {
   const x = await rotateXAuthTokens(key, dryRun);
   console.log(`x_auth_tokens : ${x.rotated}/${x.scanned} ok, ${x.failed} fallaron`);
 
-  const s = await rotateUserSecrets(key, dryRun);
-  console.log(`user_secrets  : ${s.rotated}/${s.scanned} ok, ${s.failed} fallaron`);
-
-  const failed = x.failed + s.failed;
+  const failed = x.failed;
   if (failed > 0) {
     console.error(
       `\n❌ ${failed} fila(s) no se pudieron rotar. NO promuevas la clave todavía: ` +

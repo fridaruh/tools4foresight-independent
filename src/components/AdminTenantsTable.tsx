@@ -24,7 +24,6 @@ export type AdminTenantDTO = {
   usage30d: {
     xPageCalls: number;
     ollamaCalls: number;
-    anthropic: { calls: number; tokensIn: number; tokensOut: number };
     openaiEmbed: { calls: number; tokensIn: number; tokensOut: number };
   };
 };
@@ -139,10 +138,6 @@ function AdminTenantRow({ tenant }: { tenant: AdminTenantDTO }) {
         <ul className="flex flex-col gap-0.5 tabular-nums">
           <li>x_page: {usage.xPageCalls}</li>
           <li>ollama_call: {usage.ollamaCalls}</li>
-          <li>
-            anthropic: {usage.anthropic.calls} llamadas · {usage.anthropic.tokensIn}/{usage.anthropic.tokensOut}{" "}
-            tok
-          </li>
           <li>openai_embed: {usage.openaiEmbed.tokensIn + usage.openaiEmbed.tokensOut} tok</li>
         </ul>
       </td>

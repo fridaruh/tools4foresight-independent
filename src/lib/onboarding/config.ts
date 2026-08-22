@@ -40,8 +40,6 @@ export type IconKey = ModuleKey | "guia" | "nav";
 export type OnboardingFacts = {
   /** Hay un token de X guardado para el tenant. */
   xConnected: boolean;
-  /** Hay una key de Anthropic cifrada para el tenant. */
-  hasAnthropicKey: boolean;
   /** Señales en el catálogo. */
   itemCount: number;
   /** Señales publicadas (las que entran al grafo). */
@@ -61,7 +59,6 @@ export type FactKey = keyof OnboardingFacts;
 
 export const EMPTY_FACTS: OnboardingFacts = {
   xConnected: false,
-  hasAnthropicKey: false,
   itemCount: 0,
   publishedCount: 0,
   hasGraph: false,
@@ -109,14 +106,10 @@ export const MODULE_INTROS: ModuleIntro[] = [
     title: "Paso 1 · Sistema",
     icon: "sistema",
     description:
-      "Aquí vive la conexión con X, tus cuotas del día y el estado de cada corrida del pipeline. También es donde guardas tu key de Anthropic: se cifra y solo se usa para escribir el campo Foresight de cada señal.",
-    antes:
-      "Ten a la mano tu cuenta de X y una API key de Anthropic (console.anthropic.com → API keys). Sin la key todo funciona igual, solo queda vacío el Foresight.",
+      "Aquí vive la conexión con X, tus cuotas del día y el estado de cada corrida del pipeline.",
+    antes: "Ten a la mano tu cuenta de X.",
     cta: { label: "Conectar mi cuenta de X", href: "/conexion" },
-    actions: [
-      { id: "sistema:action", label: "Conecta tu cuenta de X", fact: "xConnected" },
-      { id: "sistema:action-key", label: "Guarda tu key de Anthropic", fact: "hasAnthropicKey" },
-    ],
+    actions: [{ id: "sistema:action", label: "Conecta tu cuenta de X", fact: "xConnected" }],
   },
   {
     key: "catalogo",
@@ -154,7 +147,7 @@ export const MODULE_INTROS: ModuleIntro[] = [
     title: "Paso 4 · Análisis",
     icon: "analisis",
     description:
-      "La mesa de trabajo: por cada señal el modelo escribe TL;DR, impacto, por qué importa y (con tu key) Foresight. Edita cualquier celda y queda marcada como manual: ningún job la vuelve a pisar. Publicar una señal es lo que la mete al grafo.",
+      "La mesa de trabajo: por cada señal el modelo escribe TL;DR, impacto y por qué importa. Edita cualquier celda y queda marcada como manual: ningún job la vuelve a pisar. Publicar una señal es lo que la mete al grafo.",
     antes:
       "Publica solo lo que de verdad es una señal. Lo descartado no se borra: sale de esta tabla y deja de gastar llamadas.",
     cta: { label: "Abrir la tabla de análisis", href: "/enrich" },
@@ -324,7 +317,7 @@ export const TOUR_STEPS: TourStep[] = [
     imageLabel: "Navegación",
     icon: "nav",
     description:
-      "Arriba tienes las pestañas, ordenadas igual que el flujo: Catálogo, Análisis, Grafo, Horizontes, Categorías y Sistema. Empieza por Sistema: ahí conectas X y guardas tu key de Anthropic.",
+      "Arriba tienes las pestañas, ordenadas igual que el flujo: Catálogo, Análisis, Grafo, Horizontes, Categorías y Sistema. Empieza por Sistema: ahí conectas tu cuenta de X.",
     cta: "Empezar",
   },
 ];

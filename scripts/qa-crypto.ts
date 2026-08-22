@@ -5,8 +5,8 @@
  * Lo que protege: los blobs viejos (formato de 3 partes, sin `v1.`) tienen que
  * seguir descifrándose después de haber añadido la versión al formato, y la
  * ventana de rotación (`_NEXT` / `_PREV`) tiene que poder leer las dos claves.
- * Si algo de esto se rompe, todos los usuarios pierden su conexión de X y su
- * key de Anthropic sin que ningún test de tenant se entere.
+ * Si algo de esto se rompe, todos los usuarios pierden su conexión de X sin
+ * que ningún test de tenant se entere.
  *
  * No toca la base: solo entra y sale del módulo de cifrado.
  */

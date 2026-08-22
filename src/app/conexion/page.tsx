@@ -3,7 +3,6 @@ import { formatLongDate, truncate } from "@/lib/format";
 import { RetryFetchButton } from "@/components/RetryFetchButton";
 import { RunJobButton } from "@/components/RunJobButton";
 import { DisconnectXButton } from "@/components/DisconnectXButton";
-import { AnthropicKeyForm } from "@/components/AnthropicKeyForm";
 import { CsvLinksForm } from "@/components/CsvLinksForm";
 import { PipelineToggle } from "@/components/PipelineToggle";
 import { AnalysisPromptsEditor } from "@/components/AnalysisPromptsEditor";
@@ -65,7 +64,7 @@ export default async function ConexionPage({
 
   const [tenant, xCreditsDepleted] = await Promise.all([
     withOwner(ownerId, async (tx) => {
-      const [token, cursor, quota, jobRuns, secret, byFetchStatus, failed, total, promptOverrides] =
+      const [token, cursor, quota, jobRuns, byFetchStatus, failed, total, promptOverrides] =
         await Promise.all([
           tx.xAuthToken.findFirst({
             where: { userId: ownerId },
@@ -78,10 +77,6 @@ export default async function ConexionPage({
             orderBy: { createdAt: "desc" },
             take: 10,
           }),
-          tx.userSecret.findUnique({
-            where: { userId_provider: { userId: ownerId, provider: "anthropic" } },
-            select: { last4: true, model: true, verifiedAt: true },
-          }),
           tx.likedItem.groupBy({ by: ["fetchStatus"], where: { ownerId }, _count: { _all: true } }),
           tx.likedItem.findMany({
             where: { ownerId, fetchStatus: "failed" },
@@ -92,13 +87,12 @@ export default async function ConexionPage({
           tx.likedItem.count({ where: { ownerId } }),
           getPromptOverrides(tx, ownerId),
         ]);
-      return { token, cursor, quota, jobRuns, secret, byFetchStatus, failed, total, promptOverrides };
+      return { token, cursor, quota, jobRuns, byFetchStatus, failed, total, promptOverrides };
     }),
     isXCreditsDepleted(),
   ]);
 
-  const { token, cursor, quota, jobRuns, secret, byFetchStatus, failed, total, promptOverrides } =
-    tenant;
+  const { token, cursor, quota, jobRuns, byFetchStatus, failed, total, promptOverrides } = tenant;
   const counts = Object.fromEntries(byFetchStatus.map((row) => [row.fetchStatus, row._count._all]));
 
   return (
@@ -109,7 +103,7 @@ export default async function ConexionPage({
       <header>
         <h1 className="section-title text-ink">Sistema</h1>
         <p className="text-sm text-ink-subtle">
-          Tu cuenta de X, tus ajustes de IA, tus cuotas del día y el historial de corridas.
+          Tu cuenta de X, tus cuotas del día y el historial de corridas.
         </p>
       </header>
 
@@ -182,14 +176,6 @@ export default async function ConexionPage({
         </div>
       </section>
 
-      <AnthropicKeyForm
-        initial={{
-          last4: secret?.last4 ?? null,
-          model: secret?.model ?? null,
-          verifiedAt: secret?.verifiedAt?.toISOString() ?? null,
-        }}
-      />
-
       <section className="flex flex-col gap-3">
         <h2 className="section-heading text-ink">Cuotas del día</h2>
         {quota ? (
@@ -250,7 +236,6 @@ export default async function ConexionPage({
           tldr={{ value: promptOverrides.tldr, default: PROMPT_DEFAULTS.tldr }}
           impact={{ value: promptOverrides.impact, default: PROMPT_DEFAULTS.impact }}
           whyMatters={{ value: promptOverrides.why_matters, default: PROMPT_DEFAULTS.why_matters }}
-          foresight={{ value: promptOverrides.foresight, default: PROMPT_DEFAULTS.foresight }}
         />
       </section>
 

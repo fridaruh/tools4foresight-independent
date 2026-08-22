@@ -13,9 +13,8 @@
  * Corre `runCategorize` solo para A (budget 60s) y comprueba que A quedó
  * categorizado y B no se tocó — el aislamiento por tenant es el punto de la prueba,
  * no solo que el job funcione. Después corre `runAnalyze` solo para A y comprueba
- * tldr/impacto/por qué importa llenos, que se registraron los UsageEvent de
- * `ollama_call`, y que foresight se saltó (`foresightSkipped: true`) porque A no
- * tiene key Anthropic — no hay red real a Anthropic en este QA.
+ * tldr/impacto/por qué importa llenos, y que se registraron los UsageEvent de
+ * `ollama_call`.
  *
  * Al final borra los dos usuarios de prueba y apaga el servidor mock.
  */
@@ -195,26 +194,16 @@ async function main() {
       analyzeResult.stoppedOnBudget === false && analyzeResult.stoppedOnQuota !== true,
       JSON.stringify(analyzeResult),
     );
-    check(
-      "runAnalyze(A) marcó foresightSkipped (sin key Anthropic)",
-      analyzeResult.details?.foresightSkipped === true,
-      JSON.stringify(analyzeResult.details),
-    );
 
     const analyzedA = await withOwner(userA, (tx) =>
       tx.likedItem.findMany({
         where: { ownerId: userA },
-        select: { tldr: true, impact: true, whyMatters: true, foresight: true },
+        select: { tldr: true, impact: true, whyMatters: true },
       }),
     );
     check(
       "los 3 items de A tienen tldr/impact/whyMatters llenos",
       analyzedA.length === 3 && analyzedA.every((i) => i.tldr && i.impact && i.whyMatters),
-      JSON.stringify(analyzedA),
-    );
-    check(
-      "el foresight de A quedó sin generar (sin key Anthropic, se salta sin error)",
-      analyzedA.every((i) => i.foresight === null),
       JSON.stringify(analyzedA),
     );
 

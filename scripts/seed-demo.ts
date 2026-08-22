@@ -4,11 +4,11 @@
  *   npm run seed:demo
  *
  * Crea (o recrea) `demo@individual.local` con una contraseña conocida y le
- * siembra un tenant COMPLETO y creíble: X conectada, key de Anthropic ficticia,
- * 43 señales (40 de likes + 3 enlaces manuales) con categoría, PESTEL, TL;DR,
- * impacto, por qué importa y foresight, 18 publicadas con embedding sintético y
- * un grafo ya corrido con tres temas. Con eso, las seis pantallas de la app se
- * ven pobladas y las capturas enseñan "así se usa" en vez de estados vacíos.
+ * siembra un tenant COMPLETO y creíble: X conectada, 43 señales (40 de likes +
+ * 3 enlaces manuales) con categoría, PESTEL, TL;DR, impacto y por qué importa,
+ * 18 publicadas con embedding sintético y un grafo ya corrido con tres temas.
+ * Con eso, las seis pantallas de la app se ven pobladas y las capturas enseñan
+ * "así se usa" en vez de estados vacíos.
  *
  * Idempotente por la vía dura: si el usuario existe, se BORRA (cascade se lleva
  * todo su tenant) y se vuelve a crear. Así una segunda corrida no acumula
@@ -22,9 +22,9 @@
  * el catálogo de categorías y la cuota quedan sembrados; igual se vuelve a
  * llamar explícitamente porque es idempotente y no queremos depender del hook.
  *
- * NADA de esto es un secreto real: el token de X y la key de Anthropic son
- * cadenas inventadas que se cifran con token-crypto para que las columnas tengan
- * la forma correcta. Nunca poner aquí una credencial de verdad.
+ * NADA de esto es un secreto real: el token de X es una cadena inventada que se
+ * cifra con token-crypto para que las columnas tengan la forma correcta. Nunca
+ * poner aquí una credencial de verdad.
  *
  * El grafo: se corre `runGraph` contra un mock local de Ollama (misma técnica que
  * scripts/qa-graph-tenant.ts) en vez de contra ollama.com. Es más robusto (no
@@ -105,7 +105,6 @@ type DemoItem = {
   tldr: string;
   impact: string;
   whyMatters: string;
-  foresight?: string;
   /** Si está definido, la señal se publica y entra al grafo en ese grupo. */
   group?: Group;
   /** Días atrás del like (se reparten en la ventana de 60 días). */
@@ -137,8 +136,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Baja la barrera para construir agentes que sirvan en producción y mueve la competencia del tamaño del modelo al diseño del entorno de ejecución. Los equipos que ya tienen herramientas bien documentadas parten con ventaja.",
     whyMatters:
       "Marca el punto en que los agentes dejan de ser demo y entran a flujos de trabajo reales. Si el diferencial es el harness y no el modelo, la ventaja competitiva se vuelve replicable en meses, no en años.",
-    foresight:
-      "En 18 meses la pregunta de compra no será qué modelo usas sino qué herramientas expones y con qué garantías. Espera catálogos de herramientas certificadas y auditoría de llamadas como requisito de compliance.",
     group: 0,
     age: 3,
   },
@@ -158,8 +155,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Da un vocabulario concreto para hablar de permisos, sandbox y reintentos, que es donde se están rompiendo hoy las integraciones de agentes en empresas.",
     whyMatters:
       "La adopción de agentes se va a decidir en la confianza operativa, no en los benchmarks. Documentar los modos de falla es lo que permite acotarlos.",
-    foresight:
-      "El patrón de sandbox por defecto y permisos declarados se va a estandarizar igual que pasó con los permisos de las apps móviles. Quien no lo adopte va a quedar fuera de las compras corporativas.",
     group: 0,
     age: 7,
   },
@@ -198,8 +193,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Si se sostiene fuera del laboratorio, elimina el costo marginal de integrar una herramienta nueva y convierte a la documentación en superficie de producto.",
     whyMatters:
       "El cuello de botella de los agentes hoy es la integración, no el razonamiento. Quitar ese cuello cambia la velocidad a la que un agente se vuelve útil en una empresa.",
-    foresight:
-      "Escribir documentación pensada para que la lea una máquina se va a volver una práctica de producto con su propio rol. Los SDKs van a competir por legibilidad automática, no solo humana.",
     group: 0,
     age: 16,
   },
@@ -219,8 +212,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Contradice la promesa de delegación total y sugiere que el retorno de los agentes depende de entrenar a las personas, no solo de comprar licencias.",
     whyMatters:
       "Define dónde va a estar el trabajo humano en los próximos años: en el punto de control, no en la ejecución. Eso reescribe descripciones de puesto completas.",
-    foresight:
-      "Van a aparecer certificaciones de supervisión de agentes igual que hubo certificaciones de ofimática. La brecha de productividad no será entre quien usa IA y quien no, sino entre quien sabe corregirla y quien no.",
     group: 0,
     age: 22,
   },
@@ -240,8 +231,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Estandarizar la capa de herramientas abarata cambiar de proveedor de modelo y le quita poder de amarre a cada laboratorio.",
     whyMatters:
       "Un protocolo compartido es lo que convierte una tecnología en infraestructura. A partir de aquí, la competencia se mueve hacia arriba en la pila.",
-    foresight:
-      "En dos años los servidores de herramientas se van a parecer a los paquetes de npm: miles, mal mantenidos, y con una cadena de suministro que va a ser el siguiente frente de seguridad.",
     group: 0,
     age: 29,
   },
@@ -263,8 +252,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Presiona los precios de las APIs cerradas y vuelve viable montar la inferencia en casa para cargas de trabajo estables.",
     whyMatters:
       "Cambia la estructura de costos de cualquier producto con IA dentro. Lo que hoy es gasto variable por token puede volverse gasto fijo de infraestructura.",
-    foresight:
-      "Espera que las empresas medianas partan su carga: modelo abierto local para el 80% del volumen y API cerrada solo para lo difícil. El proveedor cerrado se vuelve especialista, no plataforma.",
     group: 1,
     age: 5,
   },
@@ -284,8 +271,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Habilita casos de uso con datos que no pueden salir de la máquina: legal, salud, gobierno. También baja el consumo energético por consulta frente al viaje al centro de datos.",
     whyMatters:
       "La privacidad deja de ser una promesa contractual y pasa a ser una propiedad física del despliegue. Eso desbloquea sectores enteros que hoy no pueden usar IA en la nube.",
-    foresight:
-      "El diferencial de los portátiles en tres años va a anunciarse en tokens por segundo, no en gigahercios. Y va a aparecer una categoría de software que solo funciona offline como argumento de venta.",
     group: 1,
     age: 9,
   },
@@ -324,8 +309,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Hace accesible la especialización de modelos a equipos sin clúster, que era el argumento más fuerte a favor de las APIs cerradas.",
     whyMatters:
       "Especializar un modelo abierto con datos propios es la vía más directa a una ventaja defendible. Bajar su costo cambia quién puede intentarlo.",
-    foresight:
-      "El fine-tuning va a dejar de ser un proyecto para volverse un paso del pipeline de datos, ejecutado semanalmente y sin supervisión humana.",
     group: 1,
     age: 20,
   },
@@ -345,8 +328,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Rompe la heurística de elegir por tamaño y expone lo poco que se evalúa en español, donde los rankings en inglés no predicen bien.",
     whyMatters:
       "Casi toda la evidencia pública sobre qué modelo usar viene de tareas en inglés. Sin evaluación local, las decisiones de arquitectura se toman a ciegas.",
-    foresight:
-      "Van a proliferar bancos de pruebas por idioma y por sector, mantenidos por comunidades y no por laboratorios. Ahí es donde se van a decidir las compras regionales.",
     group: 1,
     age: 26,
   },
@@ -366,8 +347,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Reduce a la mitad el costo y el consumo de servir modelos abiertos en el tipo de tarea que más volumen tiene en las empresas.",
     whyMatters:
       "El grueso del uso corporativo de IA es resumir y extraer, no razonar. Si eso corre cuantizado, el argumento económico de la nube se debilita.",
-    foresight:
-      "En dos años la decisión por defecto para cargas de volumen va a ser un modelo abierto cuantizado en infraestructura propia, con la nube reservada a picos.",
     group: 1,
     age: 34,
   },
@@ -389,8 +368,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Obliga a construir trazabilidad de datos donde hoy no existe, y esa trazabilidad es cara de reconstruir hacia atrás.",
     whyMatters:
       "Es el primer requisito regulatorio que toca el proceso de entrenamiento y no solo el uso. Cambia qué se puede entrenar, no solo qué se puede desplegar.",
-    foresight:
-      "El expediente técnico del modelo se va a volver un activo negociable en fusiones y adquisiciones, igual que las patentes. Quien no lo tenga va a valer menos.",
     group: 2,
     age: 2,
   },
@@ -410,8 +387,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Crea un mercado de cumplimiento antes de que exista una métrica de seguridad, con el riesgo de fijar prácticas mediocres como norma.",
     whyMatters:
       "Lo que se estandarice ahora va a ser muy difícil de cambiar después. La ventana para influir en el método es corta.",
-    foresight:
-      "Espera una segunda ola regulatoria dedicada a auditar a los auditores, igual que ocurrió en contabilidad tras los escándalos de los 2000.",
     group: 2,
     age: 8,
   },
@@ -450,8 +425,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Convierte la procedencia de los datos en un requisito contractual entre proveedor y cliente, con garantías e indemnizaciones de por medio.",
     whyMatters:
       "Traslada el riesgo legal hacia abajo en la cadena, justo hacia las empresas que menos capacidad tienen de verificarlo.",
-    foresight:
-      "Los contratos de IA empresarial van a incluir cláusulas de procedencia de datos como estándar en 12 meses, y los seguros van a empezar a cotizar ese riesgo.",
     group: 2,
     age: 21,
   },
@@ -471,8 +444,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Convierte el registro de decisiones en un requisito de ingeniería con retroactividad imposible: lo que no se guardó, no se puede reconstruir.",
     whyMatters:
       "La gobernanza de IA se va a decidir en detalles de instrumentación, no en documentos de principios. Y esa instrumentación hay que ponerla antes de que la pidan.",
-    foresight:
-      "El registro inmutable de decisiones automatizadas va a pasar de buena práctica a requisito de auditoría en dos ciclos regulatorios, arrastrando al mercado de observabilidad.",
     group: 2,
     age: 30,
   },
@@ -492,8 +463,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Abre la posibilidad de marcos más simples de cumplir para empresas locales, pero también de fragmentación entre países vecinos.",
     whyMatters:
       "La región es un mercado grande de despliegue y pequeño de entrenamiento. Cómo regule define si importa tecnología o construye capacidad propia.",
-    foresight:
-      "Va a surgir un bloque regulatorio regional propio en tres años, con la compra pública como palanca principal en vez de la sanción.",
     group: 2,
     age: 41,
   },
@@ -515,8 +484,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Reduce el capital mínimo para lanzar un producto de software a casi cero, lo que multiplica la competencia en nichos pequeños.",
     whyMatters:
       "Si lanzar deja de ser caro, el diferencial vuelve a ser la distribución y la confianza, no la capacidad de construir.",
-    foresight:
-      "El número de productos por fundador va a seguir subiendo hasta que el cuello de botella sea la atención al cliente, que es lo único que todavía no se delega bien.",
     age: 1,
   },
   {
@@ -535,8 +502,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Si se escribe más código y se revisa menos, la deuda técnica se acumula en un lugar nuevo: en lo que nadie leyó nunca.",
     whyMatters:
       "La revisión entre pares no era solo control de calidad, era transferencia de conocimiento. Perderla tiene un costo que tarda años en aparecer.",
-    foresight:
-      "En tres años vamos a ver incidentes graves atribuidos a código que ningún humano leyó, y una reacción de sobrecorrección con revisión obligatoria.",
     age: 4,
   },
   {
@@ -573,8 +538,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Convierte la disponibilidad de energía en el factor limitante del crecimiento de la IA, por delante de los chips.",
     whyMatters:
       "Donde haya energía barata y limpia se va a instalar la infraestructura. Es una decisión de política industrial disfrazada de decisión técnica.",
-    foresight:
-      "La negociación por acceso a red va a ser el cuello de botella de los despliegues antes de 2029, y va a haber moratorias municipales.",
     age: 10,
   },
   {
@@ -611,8 +574,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Reordena la valoración de las startups de IA: se mira la calidad del banco de pruebas antes que la arquitectura.",
     whyMatters:
       "Es la respuesta a la pregunta de qué queda cuando el modelo se puede cambiar por otro en una tarde.",
-    foresight:
-      "Los conjuntos de evaluación por dominio se van a comprar y vender como se compran bases de datos hoy, con licencias por uso.",
     age: 13,
   },
   {
@@ -631,8 +592,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "El diseño pedagógico resulta más determinante que la capacidad del modelo, lo que cambia qué hay que comprar y qué hay que configurar.",
     whyMatters:
       "Sin esta restricción, la herramienta produce la sensación de aprender sin el aprendizaje. Es un fallo difícil de detectar hasta el examen.",
-    foresight:
-      "Las compras educativas van a empezar a exigir evidencia de ensayo controlado, no demostraciones. Eso deja fuera a la mayoría de los proveedores actuales.",
     age: 17,
   },
   {
@@ -669,8 +628,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Rompe la escalera de formación del sector: sin puestos junior no se fabrican seniors dentro de cinco años.",
     whyMatters:
       "Es un problema de oferta futura que ninguna empresa individual tiene incentivo para resolver. Suele terminar en intervención pública.",
-    foresight:
-      "Para 2030 va a haber escasez aguda de perfiles medios y programas de formación financiados por consorcios de empresas, no por universidades.",
     age: 23,
   },
   {
@@ -689,8 +646,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Habilita asistentes que acompañan un proyecto durante meses en vez de reiniciarse cada sesión.",
     whyMatters:
       "La memoria persistente es lo que separa una herramienta de un colaborador. También es lo que convierte la privacidad en un problema serio.",
-    foresight:
-      "La memoria de largo plazo va a forzar una discusión sobre portabilidad: quién es dueño del historial cuando cambias de proveedor.",
     age: 24,
   },
   {
@@ -727,8 +682,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Abre una vía de progreso que no depende de más datos de internet, que es el recurso que se está agotando.",
     whyMatters:
       "Si el escalado de texto se estanca, la siguiente curva de mejora va a venir de aquí. Conviene saber leerla desde ahora.",
-    foresight:
-      "La robótica de propósito general va a tener su momento de inflexión cuando estos modelos bajen de costo, probablemente a finales de la década.",
     age: 28,
   },
   {
@@ -801,8 +754,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Es el obstáculo principal para desplegar agentes con permisos reales en entornos corporativos, y no hay parche a la vista.",
     whyMatters:
       "Toda la promesa de los agentes autónomos depende de resolver esto. Mientras no se resuelva, la autonomía real queda acotada a entornos cerrados.",
-    foresight:
-      "La solución práctica va a ser arquitectónica y no del modelo: separación estricta de canales de confianza, igual que se resolvió la inyección de SQL.",
     age: 38,
   },
   {
@@ -911,8 +862,6 @@ const DEMO_ITEMS: DemoItem[] = [
       "Da a los equipos pequeños acceso a datos de calidad con procedencia limpia, que era la barrera más cara de superar.",
     whyMatters:
       "La procedencia verificable de los datos va a ser requisito regulatorio. Un corpus limpio y grande es una ventaja estructural.",
-    foresight:
-      "Los corpus con licencia verificada se van a volver el activo escaso, y las editoriales científicas van a intentar cerrar esa puerta.",
     age: 58,
   },
 ];
@@ -1087,19 +1036,6 @@ async function seedConnections(tx: TenantTx, userId: string): Promise<void> {
     },
   });
 
-  // Key de Anthropic FICTICIA. `last4` es lo único que la UI enseña y por eso
-  // dice "demo": si alguien mira la captura, queda claro que no es una key real.
-  await tx.userSecret.create({
-    data: {
-      userId,
-      provider: "anthropic",
-      encrypted: encryptToken("sk-ant-api03-DEMO-NO-ES-UNA-KEY-REAL-demo"),
-      last4: "demo",
-      model: "claude-sonnet-5",
-      verifiedAt: daysAgo(0, 6, 3),
-      createdAt: daysAgo(58),
-    },
-  });
 }
 
 async function seedQuota(tx: TenantTx, userId: string): Promise<void> {
@@ -1166,8 +1102,6 @@ async function seedItems(tx: TenantTx, ownerId: string): Promise<SeededItem[]> {
         impactGeneratedAt: new Date(likedAt.getTime() + 14_400_000),
         whyMatters: spec.whyMatters,
         whyMattersGeneratedAt: new Date(likedAt.getTime() + 14_400_000),
-        foresight: spec.foresight ?? null,
-        foresightGeneratedAt: spec.foresight ? new Date(likedAt.getTime() + 18_000_000) : null,
         publishStatus: published ? "published" : "pending",
         publishedAt: published ? new Date(likedAt.getTime() + 21_600_000) : null,
       },
@@ -1256,7 +1190,6 @@ async function seedUsageAndJobs(tx: TenantTx, ownerId: string): Promise<void> {
     { kind: "x_page", units: 1 },
     { kind: "fetch", units: 1 },
     { kind: "ollama_call", units: 1, tokensIn: 1_820, tokensOut: 260 },
-    { kind: "anthropic_call", units: 1, tokensIn: 2_140, tokensOut: 310 },
     { kind: "openai_embed", units: 1, tokensIn: 640 },
   ];
   await tx.usageEvent.createMany({

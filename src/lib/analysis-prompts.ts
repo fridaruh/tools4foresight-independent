@@ -54,19 +54,7 @@ Reglas:
 - Escribe solo el resumen, sin preámbulo del tipo "Este tweet trata de...". Entra directo al asunto.
 - Si el material es solo un link sin texto ni título, dilo en una frase en vez de inventar de qué trata.`;
 
-// El prompt es de Frida, literal (2026-08-17), igual que la pregunta de impacto: es su
-// criterio de foresight, no una parafrasis nuestra. A diferencia de las otras columnas,
-// este corre en Claude (claude-opus-5) y no en Ollama — ver src/lib/foresight.ts.
-// Las reglas de abajo se agregaron el mismo dia: sin ellas, las respuestas abrian
-// evaluando la pregunta ("Sí, puede marcar un punto de inflexión...") en vez de entrar
-// directo al cambio.
-export const DEFAULT_FORESIGHT_SYSTEM = `Eres analista de foresight.De acuerdo a esto que está sucediendo cómo consideras que esto pueda cambiar el desarrollo de la Inteligencia Artificial y la interacción entre seres humanos? Consideras que esto pueda traer un cambio grande? Solo responde en un parráfo en español LÍMITE DURO: máximo 100 palabras. Cuéntalas. Es preferible quedarte en 80 que pasarte.
-
-Reglas:
-- No empieces respondiendo "Sí" ni "No", ni evaluando la pregunta ("Sí, puede marcar un punto de inflexión"). Entra directo al cambio: arranca describiéndolo, por ejemplo "Esto puede...".
-- No repitas la pregunta ni uses preámbulos; que el cambio sea grande o no debe quedar implícito en lo que describes.`;
-
-export const PROMPT_KEYS = ["tldr", "impact", "why_matters", "foresight"] as const;
+export const PROMPT_KEYS = ["tldr", "impact", "why_matters"] as const;
 export type PromptKey = (typeof PROMPT_KEYS)[number];
 
 export function isPromptKey(value: unknown): value is PromptKey {
@@ -77,7 +65,6 @@ export const PROMPT_DEFAULTS: Record<PromptKey, string> = {
   tldr: DEFAULT_TLDR_SYSTEM,
   impact: DEFAULT_IMPACT_SYSTEM,
   why_matters: DEFAULT_WHY_MATTERS_SYSTEM,
-  foresight: DEFAULT_FORESIGHT_SYSTEM,
 };
 
 /** El override guardado para cada clave DEL TENANT `ownerId`, o null si rige el default. */
@@ -97,7 +84,6 @@ export async function getPromptOverrides(
     tldr: overrideOf("tldr"),
     impact: overrideOf("impact"),
     why_matters: overrideOf("why_matters"),
-    foresight: overrideOf("foresight"),
   };
 }
 
@@ -109,13 +95,11 @@ export async function getAnalysisSystemPrompts(
   tldr: string;
   impact: string;
   whyMatters: string;
-  foresight: string;
 }> {
   const overrides = await getPromptOverrides(tx, ownerId);
   return {
     tldr: overrides.tldr ?? DEFAULT_TLDR_SYSTEM,
     impact: overrides.impact ?? DEFAULT_IMPACT_SYSTEM,
     whyMatters: overrides.why_matters ?? DEFAULT_WHY_MATTERS_SYSTEM,
-    foresight: overrides.foresight ?? DEFAULT_FORESIGHT_SYSTEM,
   };
 }

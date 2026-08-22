@@ -16,7 +16,6 @@ export type EnrichRow = {
   tldr: string | null;
   whyMatters: string | null;
   impact: string | null;
-  foresight: string | null;
   publishStatus: PublishStatus;
   customFields: Record<string, string>;
   /** El item completo, para poder abrir el popup desde esta pantalla. */
@@ -163,7 +162,6 @@ function blankRow(item: BoardItem): EnrichRow {
     tldr: null,
     whyMatters: null,
     impact: null,
-    foresight: null,
     publishStatus: "pending",
     customFields: {},
     item,
@@ -262,7 +260,7 @@ export function EnrichTable({
   /** Guarda una sola celda de prosa y refleja el valor nuevo sin recargar la tabla. */
   async function saveProse(
     id: string,
-    field: "tldr" | "impact" | "whyMatters" | "foresight",
+    field: "tldr" | "impact" | "whyMatters",
     value: string | null,
   ): Promise<boolean> {
     const ok = await patchRow(id, { [field]: value });
@@ -351,7 +349,6 @@ export function EnrichTable({
         tldr?: string | null;
         impact?: string | null;
         whyMatters?: string | null;
-        foresight?: string | null;
         pestel?: string[];
         errors?: string[];
       };
@@ -369,7 +366,6 @@ export function EnrichTable({
             tldr: data.tldr ?? null,
             impact: data.impact ?? null,
             whyMatters: data.whyMatters ?? null,
-            foresight: data.foresight ?? null,
             pestel,
           },
         }));
@@ -587,14 +583,6 @@ export function EnrichTable({
                     onSave={(value) => saveProse(id, "impact", value)}
                   />
                 </div>
-                <div>
-                  <p className="label-mono mb-1 text-[10px] text-ink-tertiary">Foresight</p>
-                  <ProseCell
-                    value={current.foresight}
-                    placeholder="Sin generar"
-                    onSave={(value) => saveProse(id, "foresight", value)}
-                  />
-                </div>
 
                 {fields.map((field) => (
                   <div key={field}>
@@ -690,7 +678,6 @@ export function EnrichTable({
               <th className="w-40 px-3 py-2 font-medium">PESTEL</th>
               <th className="min-w-64 px-3 py-2 font-medium">¿Por qué importa?</th>
               <th className="min-w-64 px-3 py-2 font-medium">Impacto</th>
-              <th className="min-w-64 px-3 py-2 font-medium">Foresight</th>
               {fields.map((field) => (
                 <th key={field} className="min-w-40 px-3 py-2 font-medium">
                   {field}
@@ -790,14 +777,6 @@ export function EnrichTable({
                       value={current.impact}
                       placeholder="Sin generar"
                       onSave={(value) => saveProse(id, "impact", value)}
-                    />
-                  </td>
-
-                  <td className="px-3 py-2">
-                    <ProseCell
-                      value={current.foresight}
-                      placeholder="Sin generar"
-                      onSave={(value) => saveProse(id, "foresight", value)}
                     />
                   </td>
 

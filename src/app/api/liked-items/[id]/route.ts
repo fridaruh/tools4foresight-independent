@@ -10,7 +10,6 @@ type Body = {
   tldr?: string | null;
   impact?: string | null;
   whyMatters?: string | null;
-  foresight?: string | null;
   /** Sacar (o devolver) el item de la tabla de enriquecimiento. No lo borra. */
   enrichDiscarded?: boolean;
   /** pending | published — ver src/lib/publish.ts */
@@ -66,11 +65,6 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     data.whyMatters = body.whyMatters;
     data.whyMattersSource = "manual";
   }
-  if ("foresight" in body) {
-    data.foresight = body.foresight;
-    data.foresightSource = "manual";
-  }
-
   // Descartar es solo una bandera de la pantalla 2: no toca categoria, textos ni nada
   // que se vea en el catalogo.
   if (typeof body.enrichDiscarded === "boolean") data.enrichDiscarded = body.enrichDiscarded;

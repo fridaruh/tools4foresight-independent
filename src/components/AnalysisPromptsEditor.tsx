@@ -9,7 +9,7 @@ type PromptState = {
 };
 
 type PromptProps = {
-  promptKey: "tldr" | "impact" | "why_matters" | "foresight";
+  promptKey: "tldr" | "impact" | "why_matters";
   title: string;
   description: string;
   initial: PromptState;
@@ -96,12 +96,10 @@ export function AnalysisPromptsEditor({
   tldr,
   impact,
   whyMatters,
-  foresight,
 }: {
   tldr: PromptState;
   impact: PromptState;
   whyMatters: PromptState;
-  foresight: PromptState;
 }) {
   return (
     <div className="flex flex-col gap-4">
@@ -122,12 +120,6 @@ export function AnalysisPromptsEditor({
         title="System prompt · ¿Por qué importa?"
         description="Las instrucciones para el «por qué importa», que se escribe partiendo del análisis de impacto ya generado."
         initial={whyMatters}
-      />
-      <PromptEditor
-        promptKey="foresight"
-        title="System prompt · Foresight"
-        description="Las instrucciones del foresight, que se escribe con Claude a partir del TL;DR y del «por qué importa» ya generados. Solo se ve en la tabla de enriquecimiento, no en Señales."
-        initial={foresight}
       />
     </div>
   );

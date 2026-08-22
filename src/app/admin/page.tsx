@@ -64,9 +64,8 @@ export default async function AdminPage() {
           <p className="mt-1 text-2xl font-medium tabular-nums text-ink">{totals.xPagesToday}</p>
         </div>
         <div className="border border-hairline bg-surface-1 p-4">
-          <p className="label-mono text-ink-tertiary">Tokens Anthropic/OpenAI 30d</p>
+          <p className="label-mono text-ink-tertiary">Tokens OpenAI 30d</p>
           <p className="mt-1 text-2xl font-medium tabular-nums text-ink">
-            {totals.anthropicTokens30d.toLocaleString("es-MX")} /{" "}
             {totals.openaiTokens30d.toLocaleString("es-MX")}
           </p>
         </div>
@@ -77,8 +76,8 @@ export default async function AdminPage() {
       <section className="flex flex-col gap-3">
         <h2 className="section-heading text-ink">Tenants</h2>
         <p className="text-sm text-ink-subtle">
-          Uso de los últimos 30 días por tipo de evento (x_page, ollama_call, anthropic_call,
-          openai_embed). Edita la cuota y guarda: aplica en la próxima corrida del pipeline.
+          Uso de los últimos 30 días por tipo de evento (x_page, ollama_call, openai_embed). Edita
+          la cuota y guarda: aplica en la próxima corrida del pipeline.
         </p>
         <AdminTenantsTable tenants={tenantDtos} />
       </section>

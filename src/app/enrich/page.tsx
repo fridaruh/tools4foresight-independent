@@ -80,7 +80,6 @@ export default async function EnrichPage({
     tldr: item.tldr,
     whyMatters: item.whyMatters,
     impact: item.impact,
-    foresight: item.foresight,
     publishStatus: item.publishStatus as EnrichRow["publishStatus"],
     customFields: Object.fromEntries(
       item.customFields.map((field) => [field.fieldKey, field.fieldValue ?? ""]),
@@ -143,7 +142,7 @@ export default async function EnrichPage({
               </>
             ) : (
               <>
-                El TL;DR, el impacto, el «por qué importa» y el foresight los escribe el modelo sobre los {ANALYSIS_WINDOW}{" "}
+                El TL;DR, el impacto y el «por qué importa» los escribe el modelo sobre los {ANALYSIS_WINDOW}{" "}
                 likes más recientes; doble click sobre el texto para corregirlo. La categoría y
                 PESTEL se guardan con el botón Guardar de la fila.
               </>

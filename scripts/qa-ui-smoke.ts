@@ -4,14 +4,13 @@
  *   npm run qa:ui
  *
  * Levanta `next dev -p 3123` como proceso hijo contra la DB real (.env.local),
- * espera a que imprima "Ready" y hace cuatro peticiones sin cookie de sesión:
+ * espera a que imprima "Ready" y hace tres peticiones sin cookie de sesión:
  *
  *   - GET  /                         -> 200, contiene "Tools 4 Foresight"
  *     (landing pública o cockpit, según haya sesión — sin cookie es la landing).
  *   - GET  /conexion                 -> 307 a /login (el proxy corta antes de
  *     llegar a la página: ver src/proxy.ts).
  *   - GET  /api/status                -> 401 (el proxy corta `/api/*` sin sesión).
- *   - POST /api/settings/anthropic    -> 401 (idem).
  *
  * No toca la DB directamente: todo pasa por HTTP contra el server real, así que
  * también sirve como smoke test de que `next build`/`next dev` arrancan sin
@@ -100,18 +99,6 @@ async function main() {
     // cookie de sesión, ver src/proxy.ts).
     const status = await fetch(`${BASE_URL}/api/status`);
     check("GET /api/status sin sesión -> 401", status.status === 401, `status=${status.status}`);
-
-    // POST /api/settings/anthropic sin sesión -> 401.
-    const anthropic = await fetch(`${BASE_URL}/api/settings/anthropic`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ apiKey: "sk-ant-test" }),
-    });
-    check(
-      "POST /api/settings/anthropic sin sesión -> 401",
-      anthropic.status === 401,
-      `status=${anthropic.status}`,
-    );
   } finally {
     console.log("\nMatando next dev…");
     child.kill("SIGTERM");

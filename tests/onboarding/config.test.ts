@@ -14,14 +14,12 @@ describe("config del onboarding", () => {
     expect(GUIDE_SECTIONS.slice(1).map((s) => s.key)).toEqual(MODULE_INTROS.map((m) => m.key));
   });
 
-  it("suma 14 tareas: el tour, seis introducciones y siete acciones", () => {
-    // El brief pedía 13 dando por hecho una acción por módulo, pero Sistema
-    // lleva dos (conectar X y guardar la key de Anthropic), así que son 14.
+  it("suma 13 tareas: el tour, seis introducciones y seis acciones", () => {
     const tasks = GUIDE_SECTIONS.flatMap((s) => s.tasks);
-    expect(tasks).toHaveLength(14);
+    expect(tasks).toHaveLength(13);
     expect(tasks.filter((t) => t.kind === "tour")).toHaveLength(1);
     expect(tasks.filter((t) => t.kind === "intro")).toHaveLength(6);
-    expect(tasks.filter((t) => t.kind === "action")).toHaveLength(7);
+    expect(tasks.filter((t) => t.kind === "action")).toHaveLength(6);
   });
 
   it("cada módulo tiene ruta, CTA y al menos una acción", () => {
@@ -41,8 +39,6 @@ describe("config del onboarding", () => {
         expect(taskKind(task.id)).toBe(task.kind);
       }
     }
-    // Un módulo puede tener varias acciones: el sufijo extra sigue siendo acción.
-    expect(taskKind("sistema:action-key")).toBe("action");
   });
 
   it("las tareas de sección arrastran el href de su módulo", () => {
@@ -59,7 +55,6 @@ describe("config del onboarding", () => {
       "catalogo:action",
       "grafo:action",
       "sistema:action",
-      "sistema:action-key",
     ]);
     // Categorías y Horizontes no dejan rastro consultable: se marcan a mano.
     expect(TASK_FACTS["categorias:action"]).toBeUndefined();

@@ -3,13 +3,12 @@ import { fetchContentMetadata } from "@/lib/content-fetch";
 import { categorizeBatch } from "@/lib/categorize";
 import { pestelClassifyBatch } from "@/lib/pestel-classify";
 import { generateImpact, generateTldr, generateWhyMatters, type AnalysisInput } from "@/lib/analyze";
-import { generateForesight } from "@/lib/foresight";
 import { getAnalysisSystemPrompts } from "@/lib/analysis-prompts";
 import { toBoardItem } from "@/lib/board-item";
 
 /**
  * Corre la cadena completa sobre UN item de UN tenant: fetch de contenido →
- * categorización → PESTEL → TL;DR → impacto → "por qué importa" → foresight.
+ * categorización → PESTEL → TL;DR → impacto → "por qué importa".
  *
  * Es la versión síncrona de lo que los jobs hacen por lotes, y existe para el
  * enlace agregado a mano: quien acaba de pegar una URL espera ver la fila llena,
@@ -49,8 +48,6 @@ export async function processSingleItem(ownerId: string, id: string) {
         impactSource: true,
         whyMatters: true,
         whyMattersSource: true,
-        foresight: true,
-        foresightSource: true,
       },
     }),
   );
@@ -209,26 +206,6 @@ export async function processSingleItem(ownerId: string, id: string) {
         }),
       );
     }
-
-    // 4. Foresight, al final: parte del TL;DR y del "por que importa". Corre en
-    //    Claude con la API key DEL USUARIO (BYOK, PLAN 3.7); si no tiene key
-    //    verificada, generateForesight se encarga y aqui se registra el motivo.
-    if (
-      tldr !== null &&
-      whyMatters !== null &&
-      item.foresight === null &&
-      item.foresightSource !== "manual"
-    ) {
-      const foresight = await generateForesight(ownerId, { tldr, whyMatters }, prompts.foresight);
-      if (foresight) {
-        await write((tx) =>
-          tx.likedItem.updateMany({
-            where: { id, ownerId, foresight: null, foresightSource: { not: "manual" } },
-            data: { foresight, foresightSource: "auto", foresightGeneratedAt: new Date() },
-          }),
-        );
-      }
-    }
   } catch (error) {
     errors.push(`No se pudo generar el análisis: ${message(error)}`);
   }
@@ -247,7 +224,6 @@ export async function processSingleItem(ownerId: string, id: string) {
     tldr: updated.tldr,
     impact: updated.impact,
     whyMatters: updated.whyMatters,
-    foresight: updated.foresight,
     pestel: updated.pestel,
     ...(errors.length > 0 ? { errors } : {}),
   };

@@ -87,9 +87,6 @@ async function main() {
       await tx.usageEvent.create({ data: { userId: userA, kind: "x_page", units: 1 } });
       await tx.usageEvent.create({ data: { userId: userA, kind: "ollama_call", units: 1 } });
       await tx.usageEvent.create({
-        data: { userId: userA, kind: "anthropic_call", units: 1, tokensIn: 100, tokensOut: 40 },
-      });
-      await tx.usageEvent.create({
         data: { userId: userA, kind: "openai_embed", units: 1, tokensIn: 250, tokensOut: 0 },
       });
       await tx.jobRun.create({
@@ -133,11 +130,6 @@ async function main() {
       "el uso 30d de A: 2 x_page, 1 ollama_call",
       rowA?.usage30d.xPageCalls === 2 && rowA?.usage30d.ollamaCalls === 1,
       JSON.stringify(rowA?.usage30d),
-    );
-    check(
-      "el uso 30d de A: anthropic 100 in / 40 out",
-      rowA?.usage30d.anthropic.tokensIn === 100 && rowA?.usage30d.anthropic.tokensOut === 40,
-      JSON.stringify(rowA?.usage30d.anthropic),
     );
     check(
       "el uso 30d de A: openai_embed 250 in",

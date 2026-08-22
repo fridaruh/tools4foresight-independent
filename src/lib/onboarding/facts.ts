@@ -29,13 +29,9 @@ import { withOwner } from "@/lib/tenant-db";
 export async function getOnboardingFacts(userId: string): Promise<OnboardingFacts> {
   try {
     return await withOwner(userId, async (tx) => {
-      const [xToken, anthropicKey, itemCount, publishedCount, clusters, snapshots] =
+      const [xToken, itemCount, publishedCount, clusters, snapshots] =
         await Promise.all([
           tx.xAuthToken.findFirst({ where: { userId }, select: { id: true } }),
-          tx.userSecret.findFirst({
-            where: { userId, provider: "anthropic" },
-            select: { last4: true },
-          }),
           tx.likedItem.count({ where: { ownerId: userId } }),
           tx.likedItem.count({ where: { ownerId: userId, publishStatus: "published" } }),
           tx.semanticCluster.count({ where: { ownerId: userId } }),
@@ -44,7 +40,6 @@ export async function getOnboardingFacts(userId: string): Promise<OnboardingFact
 
       return {
         xConnected: Boolean(xToken),
-        hasAnthropicKey: Boolean(anthropicKey),
         itemCount,
         publishedCount,
         // Un tema o un snapshot: cualquiera de los dos prueba que el grafo ya

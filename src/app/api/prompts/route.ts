@@ -17,7 +17,6 @@ export async function GET() {
       tldr: { value: overrides.tldr, default: PROMPT_DEFAULTS.tldr },
       impact: { value: overrides.impact, default: PROMPT_DEFAULTS.impact },
       why_matters: { value: overrides.why_matters, default: PROMPT_DEFAULTS.why_matters },
-      foresight: { value: overrides.foresight, default: PROMPT_DEFAULTS.foresight },
     },
   });
 }

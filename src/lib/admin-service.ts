@@ -33,8 +33,6 @@ export type TenantUsageBreakdown = {
   xPageCalls: number;
   /** UsageEvent kind=ollama_call: llamadas a Ollama (categorizar/PESTEL/analizar). */
   ollamaCalls: number;
-  /** UsageEvent kind=anthropic_call: foresight, BYOK. */
-  anthropic: { calls: number; tokensIn: number; tokensOut: number };
   /** UsageEvent kind=openai_embed: embeddings del grafo. */
   openaiEmbed: { calls: number; tokensIn: number; tokensOut: number };
 };
@@ -72,8 +70,6 @@ export type AdminTotals = {
   active7d: number;
   /** Suma de UsageEvent kind=x_page, units, de hoy (00:00 UTC en adelante). */
   xPagesToday: number;
-  /** Suma de tokens (in+out) de UsageEvent kind=anthropic_call, últimos 30 días. */
-  anthropicTokens30d: number;
   /** Suma de tokens (in+out) de UsageEvent kind=openai_embed, últimos 30 días. */
   openaiTokens30d: number;
 };
@@ -87,7 +83,6 @@ function emptyUsage(): TenantUsageBreakdown {
   return {
     xPageCalls: 0,
     ollamaCalls: 0,
-    anthropic: { calls: 0, tokensIn: 0, tokensOut: 0 },
     openaiEmbed: { calls: 0, tokensIn: 0, tokensOut: 0 },
   };
 }
@@ -176,7 +171,6 @@ export async function getAdminOverview(tx: TenantTx): Promise<AdminOverview> {
   const activeOwnerIds = new Set(activeOwners.map((r) => r.ownerId));
 
   const usageByOwner = new Map<string, TenantUsageBreakdown>();
-  let anthropicTokens30d = 0;
   let openaiTokens30d = 0;
   for (const row of usage30d) {
     const usage = usageByOwner.get(row.userId) ?? emptyUsage();
@@ -186,12 +180,7 @@ export async function getAdminOverview(tx: TenantTx): Promise<AdminOverview> {
 
     if (row.kind === "x_page") usage.xPageCalls += count;
     else if (row.kind === "ollama_call") usage.ollamaCalls += count;
-    else if (row.kind === "anthropic_call") {
-      usage.anthropic.calls += count;
-      usage.anthropic.tokensIn += tokensIn;
-      usage.anthropic.tokensOut += tokensOut;
-      anthropicTokens30d += tokensIn + tokensOut;
-    } else if (row.kind === "openai_embed") {
+    else if (row.kind === "openai_embed") {
       usage.openaiEmbed.calls += count;
       usage.openaiEmbed.tokensIn += tokensIn;
       usage.openaiEmbed.tokensOut += tokensOut;
@@ -227,7 +216,6 @@ export async function getAdminOverview(tx: TenantTx): Promise<AdminOverview> {
     tenants: users.length,
     active7d: activeOwnerIds.size,
     xPagesToday: xPagesTodayAgg._sum.units ?? 0,
-    anthropicTokens30d,
     openaiTokens30d,
   };
 

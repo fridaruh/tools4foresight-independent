@@ -3,8 +3,8 @@ import { processSingleItem } from "@/lib/jobs/process-item";
 import { requireUserApi } from "@/lib/require-user";
 
 // Varias llamadas al modelo en cadena (categoria, PESTEL, TL;DR, impacto, por
-// que importa, foresight) con 90 s de timeout cada una. El default de 10 s no
-// alcanza ni para la primera.
+// que importa) con 90 s de timeout cada una. El default de 10 s no alcanza ni
+// para la primera.
 export const maxDuration = 300;
 
 /**

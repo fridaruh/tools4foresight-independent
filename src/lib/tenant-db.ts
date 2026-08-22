@@ -153,7 +153,6 @@ export const TENANT_MODEL_FIELD = {
   jobRun: "ownerId",
   ingestionCursor: "userId",
   xAuthToken: "userId",
-  userSecret: "userId",
   userQuota: "userId",
   usageEvent: "userId",
 } as const;
