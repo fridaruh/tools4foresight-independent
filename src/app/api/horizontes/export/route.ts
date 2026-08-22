@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { requireAccessApi } from "@/lib/require-admin";
+import { requireSessionApi } from "@/lib/require-admin";
 
 const KINDS = ["temas", "senales", "historial"] as const;
 type Kind = (typeof KINDS)[number];
@@ -10,7 +10,7 @@ type Kind = (typeof KINDS)[number];
 // fila por señal con su tema, horizonte y vitalidad) e historial (una fila por
 // tema y snapshot: la serie temporal).
 export async function GET(request: NextRequest) {
-  const denied = await requireAccessApi();
+  const denied = await requireSessionApi();
   if (denied) return denied;
 
   const kind = request.nextUrl.searchParams.get("kind") as Kind | null;

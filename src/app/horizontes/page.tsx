@@ -1,26 +1,17 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getAccess } from "@/lib/require-admin";
+import { getEffectiveRole } from "@/lib/require-admin";
 import { HorizontesBoard, type HorizonteCluster, type HorizontesPayload } from "@/components/HorizontesBoard";
 
 export const dynamic = "force-dynamic";
 
-// Pestaña 04 (admin y member): los temas del grafo leidos como tendencias — horizonte
-// (H1/H2/H3) sugerido por la heuristica y corregible a mano, indicadores de
-// seguimiento, temas muertos y exports CSV. Todo viene precalculado por
-// refreshGraph (src/lib/jobs/graph.ts); esta pagina solo lee. Un member ve lo
-// mismo que el admin salvo que no puede fijar horizontes ni ve avisos de jobs.
-// Fuera del render por la regla del compilador de React (mismo patron que
-// usuarios/page.tsx); con force-dynamic corre en cada request igual.
 function historySince(): Date {
   return new Date(Date.now() - 90 * 86_400_000);
 }
 
 export default async function HorizontesPage() {
-  const { role, hasAccess } = await getAccess();
+  const role = await getEffectiveRole();
   if (role === null) redirect("/login?from=%2Fhorizontes");
-  // Member sin suscripcion vigente: a pagar (Fase 4), como en /senales.
-  if (!hasAccess) redirect("/suscripcion");
   const canEdit = role === "admin";
   const since = historySince();
 

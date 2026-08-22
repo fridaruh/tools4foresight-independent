@@ -9,7 +9,6 @@ import {
 } from "@/lib/liked-items-query";
 import { ViewToggle, type ViewMode } from "@/components/ViewToggle";
 import { FiltersBar } from "@/components/FiltersBar";
-import { FavoriteButton } from "@/components/FavoriteButton";
 import { LikedItemCard } from "@/components/LikedItemCard";
 import { LikedItemRow } from "@/components/LikedItemRow";
 import { TweetModal } from "@/components/TweetModal";
@@ -23,7 +22,6 @@ export function LikedItemsBoard({
   initialNextOffset,
   initialFilters,
   audience = "admin",
-  initialFavoriteIds = null,
 }: {
   initialItems: BoardItem[];
   initialTotal: number;
@@ -35,11 +33,6 @@ export function LikedItemsBoard({
    * copy del estado vacio (un member no tiene boton de sincronizar).
    */
   audience?: "admin" | "member";
-  /**
-   * Ids de señal guardados por el usuario, para pintar los corazones. null =
-   * no hay cuenta detras (cookie legacy o board de admin): sin corazones.
-   */
-  initialFavoriteIds?: string[] | null;
 }) {
   const basePath = audience === "member" ? "/senales" : "/";
   const [view, setView] = useState<ViewMode>("cards");
@@ -49,35 +42,7 @@ export function LikedItemsBoard({
   const [nextOffset, setNextOffset] = useState(initialNextOffset);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  // Indice y no objeto: el preview navega con anterior/siguiente sobre la lista
-  // cargada, y el indice es lo que hace esa relacion explicita.
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  // Set y no array: el toggle del corazón consulta y muta por id.
-  const [favoriteIds, setFavoriteIds] = useState<Set<string> | null>(
-    initialFavoriteIds === null ? null : new Set(initialFavoriteIds),
-  );
-
-  function setFavorite(id: string, favorited: boolean) {
-    setFavoriteIds((prev) => {
-      if (prev === null) return prev;
-      const next = new Set(prev);
-      if (favorited) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  /** El corazón de un item, o undefined si esta vista no tiene favoritos. */
-  function favoriteButtonFor(item: BoardItem) {
-    if (favoriteIds === null) return undefined;
-    return (
-      <FavoriteButton
-        likedItemId={item.id}
-        favorited={favoriteIds.has(item.id)}
-        onChange={(favorited) => setFavorite(item.id, favorited)}
-      />
-    );
-  }
 
   // El render del servidor ya trajo la primera pagina con `initialFilters`, asi que
   // el efecto de abajo no debe repetir esa misma consulta al montar.
@@ -207,7 +172,6 @@ export function LikedItemsBoard({
               key={item.id}
               item={item}
               onOpen={() => setSelectedIndex(index)}
-              favoriteButton={favoriteButtonFor(item)}
             />
           ))}
         </div>
@@ -233,7 +197,6 @@ export function LikedItemsBoard({
       {selected && (
         <TweetModal
           item={selected}
-          favoriteButton={favoriteButtonFor(selected)}
           onClose={() => setSelectedIndex(null)}
           onPrev={goPrev}
           onNext={goNext}

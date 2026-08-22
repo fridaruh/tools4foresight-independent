@@ -4,18 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { CATEGORIES, isKnownCategory } from "@/config/categories";
 import { CategoryBadge } from "@/components/CategoryBadge";
 import { RunJobButton } from "@/components/RunJobButton";
-import { getAccess } from "@/lib/require-admin";
-import { CategoriasMemberView } from "./member-view";
+import { getEffectiveRole } from "@/lib/require-admin";
 
 export const dynamic = "force-dynamic";
 
-// La ruta se comparte por rol, como "/": para un member es su home de tarjetas
-// por categoria; para admin sigue siendo la taxonomia de siempre.
 export default async function CategoriasPage() {
-  const { role, hasAccess } = await getAccess();
+  const role = await getEffectiveRole();
   if (role === null) redirect("/login?from=%2Fcategorias");
-  // Member sin suscripcion vigente: a pagar antes de ver contenido (Fase 4).
-  if (role === "member") return hasAccess ? <CategoriasMemberView /> : redirect("/suscripcion");
 
   const [grouped, manualCount, lowConfidence] = await Promise.all([
     prisma.likedItem.groupBy({

@@ -1,9 +1,7 @@
 // Remitente de todos los correos de la app. El display name es fijo
-// ("Tools 4 Foresight", pedido de Frida 2026-08-17); la dirección sale de
-// MAGIC_LINK_FROM_EMAIL para respetar el dominio verificado en Resend sin
-// duplicarlo en el código — de esa env var solo se usa el email, su display
-// name (si trae) se ignora.
-const FALLBACK_ADDRESS = "onboarding@resend.dev";
+// ("Tools 4 Foresight"); la dirección sale de MAGIC_LINK_FROM_EMAIL para respetar
+// el dominio verificado en Resend sin duplicarlo en el código.
+const FALLBACK_ADDRESS = "noreply@resend.dev";
 
 export const EMAIL_SENDER_NAME = "Tools 4 Foresight";
 

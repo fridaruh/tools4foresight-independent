@@ -6,7 +6,6 @@ import { Resend } from "resend";
 import { prisma } from "@/lib/prisma";
 import { magicLinkEmail } from "@/lib/magic-link-email";
 import { emailFrom } from "@/lib/email-from";
-import { sendOnboardingStep } from "@/lib/jobs/onboarding";
 
 // Instanciar Resend solo al mandar el email, no al cargar el modulo: este archivo
 // se importa desde paginas y route handlers que se evaluan en build time (next
@@ -19,39 +18,18 @@ function getResend(): Resend {
 // Signup abierto: verificar el magic link de un email desconocido crea la
 // cuenta con role "member" (defaultValue del additionalField; `input: false`
 // impide que el cliente mande role, asi que nadie se auto-asigna admin).
-// Mientras no exista Fase 4 (Stripe), member = acceso completo a /senales.
 const MAGIC_LINK_EXPIRY_MINUTES = 10;
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: "postgresql" }),
   secret: process.env.AUTH_SECRET,
-  // Registro con contraseña además del magic link (pedido de Frida, 2026-08-17):
+  // Registro con contraseña además del magic link:
   // el hash vive en accounts.password, columna que better-auth ya pedía. El
   // signup sigue abierto igual que con el magic link; el rol lo fija el
   // additionalField de abajo (input: false), así que nadie se auto-asigna admin.
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
-  },
-  databaseHooks: {
-    user: {
-      create: {
-        // Correo de bienvenida al crear la cuenta (magic link o contraseña,
-        // ambos pasan por aqui). Un fallo de Resend nunca debe romper el
-        // signup: se traga y el usuario simplemente no recibe la bienvenida.
-        after: async (user) => {
-          try {
-            await sendOnboardingStep(
-              { id: user.id, email: user.email, name: user.name },
-              "welcome",
-              {},
-            );
-          } catch (error) {
-            console.error("No se pudo mandar el correo de bienvenida:", error);
-          }
-        },
-      },
-    },
   },
   user: {
     // El cambio de email de /perfil NO usa el endpoint changeEmail de
@@ -63,29 +41,6 @@ export const auth = betterAuth({
         type: "string",
         required: true,
         defaultValue: "member",
-        input: false,
-      },
-      stripeCustomerId: {
-        type: "string",
-        required: false,
-        input: false,
-      },
-      // Espejo del estado de la suscripcion de Stripe (lo escribe el webhook).
-      // Declarado aqui para que viaje en session.user y el gate de acceso no
-      // tenga que hacer una query extra por request (src/lib/require-admin.ts).
-      subscriptionStatus: {
-        type: "string",
-        required: false,
-        input: false,
-      },
-      subscriptionId: {
-        type: "string",
-        required: false,
-        input: false,
-      },
-      subscriptionPeriodEnd: {
-        type: "date",
-        required: false,
         input: false,
       },
     },

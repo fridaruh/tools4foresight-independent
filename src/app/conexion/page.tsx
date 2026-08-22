@@ -18,7 +18,7 @@ const STATUS_LABELS: Record<string, string> = {
 export default async function ConexionPage() {
   await requireAdminPage();
 
-  const [token, cursor, byFetchStatus, failed, total, promptOverrides, feedback] = await Promise.all([
+  const [token, cursor, byFetchStatus, failed, total, promptOverrides] = await Promise.all([
     prisma.xAuthToken.findFirst({ select: { xUserId: true, expiresAt: true, updatedAt: true } }),
     prisma.ingestionCursor.findFirst(),
     prisma.likedItem.groupBy({ by: ["fetchStatus"], _count: { _all: true } }),
@@ -30,11 +30,6 @@ export default async function ConexionPage() {
     }),
     prisma.likedItem.count(),
     getPromptOverrides(),
-    prisma.feedback.findMany({
-      orderBy: { createdAt: "desc" },
-      take: 50,
-      include: { user: { select: { email: true, name: true } } },
-    }),
   ]);
 
   const counts = Object.fromEntries(byFetchStatus.map((row) => [row.fetchStatus, row._count._all]));
@@ -114,31 +109,6 @@ export default async function ConexionPage() {
         />
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="section-heading text-ink">Feedback de miembros</h2>
-        <p className="text-sm text-ink-subtle">
-          Lo que mandan desde el recuadro de la barra de Señales. Los {feedback.length} más
-          recientes.
-        </p>
-        {feedback.length === 0 ? (
-          <p className="rounded-xl border border-dashed border-hairline-strong py-8 text-center text-sm text-ink-subtle">
-            Todavía no llega ningún comentario.
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {feedback.map((entry) => (
-              <li key={entry.id} className="rounded-xl border border-hairline bg-surface-1 p-3">
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-ink">{entry.message}</p>
-                <p className="mt-1.5 text-[11px] text-ink-tertiary">
-                  {entry.user ? `${entry.user.name} · ${entry.user.email}` : "cuenta borrada"} ·{" "}
-                  {formatLongDate(entry.createdAt)}
-                  {entry.path ? ` · en ${entry.path}` : ""}
-                </p>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
       <section className="flex flex-col gap-3">
         <h2 className="section-heading text-ink">Extracción de contenido</h2>

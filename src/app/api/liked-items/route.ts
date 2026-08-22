@@ -3,13 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { buildWhere, filtersFromSearchParams } from "@/lib/liked-items-query";
 import { toBoardItem } from "@/lib/board-item";
 import { InvalidLinkError, manualItemInput, normalizeLinkUrl } from "@/lib/manual-link";
-import { getEffectiveRole, requireAccessApi, requireAdminApi } from "@/lib/require-admin";
+import { getEffectiveRole, requireSessionApi, requireAdminApi } from "@/lib/require-admin";
 
 const DEFAULT_LIMIT = 60;
 
 export async function GET(request: NextRequest) {
-  // Member sin suscripcion vigente: 402 (Fase 4). Admin y cookie legacy pasan.
-  const denied = await requireAccessApi();
+  const denied = await requireSessionApi();
   if (denied) return denied;
 
   const searchParams = request.nextUrl.searchParams;

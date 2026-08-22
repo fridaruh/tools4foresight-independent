@@ -1,20 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { redirect } from "next/navigation";
-import { getAccess } from "@/lib/require-admin";
+import { getEffectiveRole } from "@/lib/require-admin";
 import { SemanticGraph, type GraphPayload } from "@/components/SemanticGraph";
 
 export const dynamic = "force-dynamic";
 
-// Pestaña 03 (admin y member): el mapa de enlaces semanticos entre señales
-// publicadas. Los nodos, aristas y temas ya viven precalculados en Postgres (los
-// escribe el job de embeddings, src/lib/jobs/embed.ts); esta pagina solo los lee,
-// asi que abrir el grafo no llama a ningun modelo. Un member ve el mismo grafo
-// que el admin; solo se le ocultan los avisos internos de jobs (sin embeber).
 export default async function GrafoPage() {
-  const { role, hasAccess } = await getAccess();
+  const role = await getEffectiveRole();
   if (role === null) redirect("/login?from=%2Fgrafo");
-  // Member sin suscripcion vigente: a pagar (Fase 4), como en /senales.
-  if (!hasAccess) redirect("/suscripcion");
   const isAdmin = role === "admin";
 
   const [items, links, clusters, unembedded] = await Promise.all([

@@ -11,86 +11,23 @@ datasource db {
 }
 
 // --- Auth (better-auth, magic link) ---
-// Fase 1 del plan de paywall: reemplaza el password gate temporal de Fase 0.
-// Frida es la unica que da de alta miembros por ahora (disableSignUp en
-// src/lib/auth.ts); el resto de columnas las pide better-auth tal cual.
 model User {
-  id               String    @id @default(uuid())
-  name             String
-  email            String    @unique
-  emailVerified    Boolean   @default(false) @map("email_verified")
-  image            String?
-  // admin -> Frida, ve /enrich /conexion /categorias y puede mutar. member -> lector
-  // de pago, solo ve /senales (Fase 3+).
-  role             String    @default("member")
-  stripeCustomerId String?   @map("stripe_customer_id")
-  // --- Suscripcion (Fase 4, Stripe) ---
-  // Espejo local de la suscripcion de Stripe, actualizado por el webhook
-  // (/api/billing/webhook) y al volver del Checkout. Se guarda para decidir el
-  // acceso a /senales en cada request sin pegarle a Stripe (src/lib/subscription.ts).
-  //   status -> el de Stripe tal cual: trialing | active | past_due | canceled |
-  //             unpaid | incomplete | incomplete_expired | paused. null = nunca se suscribio.
-  //   plan   -> monthly ($15) | annual ($150), segun el lookup_key del precio.
-  subscriptionId                String?   @map("subscription_id")
-  subscriptionStatus            String?   @map("subscription_status")
-  subscriptionPlan              String?   @map("subscription_plan")
-  subscriptionPeriodEnd         DateTime? @map("subscription_period_end")
-  subscriptionCancelAtPeriodEnd Boolean   @default(false) @map("subscription_cancel_at_period_end")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  id            String   @id @default(uuid())
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false) @map("email_verified")
+  image         String?
+  // admin -> Frida, ve /enrich /conexion /categorias y puede mutar. member -> usuario.
+  role          String   @default("member")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  sessions         Session[]
-  accounts         Account[]
-  favorites        Favorite[]
-  feedback         Feedback[]
-  onboardingEmails OnboardingEmail[]
+  sessions Session[]
+  accounts Account[]
 
-  @@index([stripeCustomerId])
   @@map("users")
 }
 
-// Registro de qué correo de onboarding ya se le mandó a quién: el cron decide
-// qué toca por dias desde el alta, y esta tabla evita repetir. `step` es
-// welcome | day1 | day3 | day7 | day14 | reactivation.
-model OnboardingEmail {
-  id     String   @id @default(uuid())
-  userId String   @map("user_id")
-  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  step   String
-  sentAt DateTime @default(now()) @map("sent_at")
-
-  @@unique([userId, step])
-  @@map("onboarding_emails")
-}
-
-// Señales que un usuario guardó desde /senales (botón de favoritos en la esquina
-// de la tarjeta/ficha). Solo referencian items publicados — lo valida el API,
-// no la base, para no romper si una señal se despublica después de guardada.
-model Favorite {
-  id          String    @id @default(uuid())
-  userId      String    @map("user_id")
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  likedItemId String    @map("liked_item_id")
-  likedItem   LikedItem @relation(fields: [likedItemId], references: [id], onDelete: Cascade)
-  createdAt   DateTime  @default(now()) @map("created_at")
-
-  @@unique([userId, likedItemId])
-  @@index([userId])
-  @@map("favorites")
-}
-
-// Lo que los miembros mandan desde el recuadro de la barra lateral de /senales.
-// Frida lo lee en /conexion. `path` = en qué pantalla estaban al mandarlo.
-model Feedback {
-  id        String   @id @default(uuid())
-  userId    String?  @map("user_id")
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
-  message   String
-  path      String?
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@map("feedback")
-}
 
 model Session {
   id        String   @id @default(uuid())
@@ -275,7 +212,6 @@ model LikedItem {
   vitalityAt    DateTime?                   @map("vitality_at")
 
   customFields LikedItemCustomField[]
-  favorites    Favorite[]
   linksAsA     SemanticLink[]         @relation("SemanticLinkA")
   linksAsB     SemanticLink[]         @relation("SemanticLinkB")
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { CATEGORY_NAMES } from "@/config/categories";
-import { getEffectiveRole, requireAccessApi } from "@/lib/require-admin";
+import { getEffectiveRole, requireSessionApi } from "@/lib/require-admin";
 
 export type CategoryOption = { name: string; count: number };
 
@@ -14,7 +14,7 @@ export type CategoryOption = { name: string; count: number };
 // interno. Publicar exige categoria (src/lib/publish.ts), asi que para member
 // `uncategorized` es siempre 0 y el filtro "Sin categorizar" no aparece.
 export async function GET(request: NextRequest) {
-  const denied = await requireAccessApi();
+  const denied = await requireSessionApi();
   if (denied) return denied;
   const role = await getEffectiveRole();
   // scope=published lo manda el board de /senales tambien para admins, para que
