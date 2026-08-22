@@ -1,0 +1,483 @@
+// Prisma schema para x-likes-curator
+// Modelo definido en PLANS/TWITTER_LIKES_CURATION_PLATFORM.md (sección 4)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// --- Auth (better-auth, magic link) ---
+// Fase 1 del plan de paywall: reemplaza el password gate temporal de Fase 0.
+// Frida es la unica que da de alta miembros por ahora (disableSignUp en
+// src/lib/auth.ts); el resto de columnas las pide better-auth tal cual.
+model User {
+  id               String    @id @default(uuid())
+  name             String
+  email            String    @unique
+  emailVerified    Boolean   @default(false) @map("email_verified")
+  image            String?
+  // admin -> Frida, ve /enrich /conexion /categorias y puede mutar. member -> lector
+  // de pago, solo ve /senales (Fase 3+).
+  role             String    @default("member")
+  stripeCustomerId String?   @map("stripe_customer_id")
+  // --- Suscripcion (Fase 4, Stripe) ---
+  // Espejo local de la suscripcion de Stripe, actualizado por el webhook
+  // (/api/billing/webhook) y al volver del Checkout. Se guarda para decidir el
+  // acceso a /senales en cada request sin pegarle a Stripe (src/lib/subscription.ts).
+  //   status -> el de Stripe tal cual: trialing | active | past_due | canceled |
+  //             unpaid | incomplete | incomplete_expired | paused. null = nunca se suscribio.
+  //   plan   -> monthly ($15) | annual ($150), segun el lookup_key del precio.
+  subscriptionId                String?   @map("subscription_id")
+  subscriptionStatus            String?   @map("subscription_status")
+  subscriptionPlan              String?   @map("subscription_plan")
+  subscriptionPeriodEnd         DateTime? @map("subscription_period_end")
+  subscriptionCancelAtPeriodEnd Boolean   @default(false) @map("subscription_cancel_at_period_end")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  sessions         Session[]
+  accounts         Account[]
+  favorites        Favorite[]
+  feedback         Feedback[]
+  onboardingEmails OnboardingEmail[]
+
+  @@index([stripeCustomerId])
+  @@map("users")
+}
+
+// Registro de qué correo de onboarding ya se le mandó a quién: el cron decide
+// qué toca por dias desde el alta, y esta tabla evita repetir. `step` es
+// welcome | day1 | day3 | day7 | day14 | reactivation.
+model OnboardingEmail {
+  id     String   @id @default(uuid())
+  userId String   @map("user_id")
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  step   String
+  sentAt DateTime @default(now()) @map("sent_at")
+
+  @@unique([userId, step])
+  @@map("onboarding_emails")
+}
+
+// Señales que un usuario guardó desde /senales (botón de favoritos en la esquina
+// de la tarjeta/ficha). Solo referencian items publicados — lo valida el API,
+// no la base, para no romper si una señal se despublica después de guardada.
+model Favorite {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  likedItemId String    @map("liked_item_id")
+  likedItem   LikedItem @relation(fields: [likedItemId], references: [id], onDelete: Cascade)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([userId, likedItemId])
+  @@index([userId])
+  @@map("favorites")
+}
+
+// Lo que los miembros mandan desde el recuadro de la barra lateral de /senales.
+// Frida lo lee en /conexion. `path` = en qué pantalla estaban al mandarlo.
+model Feedback {
+  id        String   @id @default(uuid())
+  userId    String?  @map("user_id")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  message   String
+  path      String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("feedback")
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  expiresAt DateTime @map("expires_at")
+  token     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+// Sin proveedores OAuth por ahora (solo magic link), pero better-auth la pide
+// igual: el plugin de magic link no la usa, otros plugins futuros si.
+model Account {
+  id                    String    @id @default(uuid())
+  accountId             String    @map("account_id")
+  providerId            String    @map("provider_id")
+  userId                String    @map("user_id")
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?   @map("access_token")
+  refreshToken          String?   @map("refresh_token")
+  idToken               String?   @map("id_token")
+  accessTokenExpiresAt  DateTime? @map("access_token_expires_at")
+  refreshTokenExpiresAt DateTime? @map("refresh_token_expires_at")
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  @@map("accounts")
+}
+
+// Donde el plugin de magic link guarda el token mientras no se usa.
+model Verification {
+  id         String    @id @default(uuid())
+  identifier String
+  value      String
+  expiresAt  DateTime  @map("expires_at")
+  createdAt  DateTime? @default(now()) @map("created_at")
+  updatedAt  DateTime? @updatedAt @map("updated_at")
+
+  @@map("verifications")
+}
+
+model XAuthToken {
+  id           String   @id @default(uuid())
+  xUserId      String   @unique @map("x_user_id")
+  accessToken  String   @map("access_token") // cifrado a nivel de aplicación
+  refreshToken String   @map("refresh_token") // cifrado a nivel de aplicación
+  expiresAt    DateTime @map("expires_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("x_auth_tokens")
+}
+
+model LikedItem {
+  id String @id @default(uuid())
+
+  // De donde salio el item:
+  //   x_like -> lo trajo la ingesta de likes de X
+  //   manual -> Frida pego el enlace a mano en la pantalla de enriquecimiento
+  // Un item manual no tiene tweet detras, pero ocupa las mismas columnas: `tweetId`
+  // lleva un id sintetico (manual:<uuid>), `tweetUrl` y `tweetText` llevan la URL, y
+  // `authorHandle` el dominio. Asi la categorizacion y el analisis lo procesan sin
+  // ramas especiales — ya sabian lidiar con un tweet que es solo un link.
+  source String @default("x_like")
+
+  tweetId      String   @unique @map("tweet_id")
+  authorHandle String   @map("author_handle")
+  authorName   String?  @map("author_name")
+  tweetText    String   @map("tweet_text")
+  tweetUrl     String   @map("tweet_url")
+  mediaUrls    String[] @default([]) @map("media_urls")
+
+  // --- Las tres fechas del item (ver PLAN seccion 1.4) ---
+  // La X API no expone cuando ocurrio el like, solo el orden. Por eso separamos:
+  //   tweetCreatedAt -> exacto, derivado del snowflake ID del tweet (sin costo de API)
+  //   detectedAt     -> exacto, el momento del polling que lo trajo
+  //   likedAt        -> ESTIMACION acotada entre ambos; es sobre lo que filtra la UI
+  tweetCreatedAt DateTime? @map("tweet_created_at")
+  detectedAt     DateTime? @map("detected_at")
+  likedAt        DateTime  @map("liked_at")
+  // tweet_date  = solo se pudo acotar con la fecha del tweet (items historicos)
+  // ordered     = acotado ademas por la ventana entre corridas y el orden de likes
+  likedAtSource String @default("tweet_date") @map("liked_at_source")
+  // Posicion en el orden de likes que devolvio X (0 = el like mas reciente visto).
+  // Se conserva para poder recalcular estimaciones sin volver a pegarle a la API.
+  likeRank Int? @map("like_rank")
+
+  // contenido enlazado (nullable: no todo tweet tiene link externo)
+  contentUrl         String?   @map("content_url")
+  contentTitle       String?   @map("content_title")
+  contentDescription String?   @map("content_description")
+  contentImageUrl    String?   @map("content_image_url")
+  contentPublishedAt DateTime? @map("content_published_at")
+  fetchedAt          DateTime? @map("fetched_at")
+  fetchStatus        String    @default("pending") @map("fetch_status") // pending | success | failed | not_applicable
+
+  // categorizacion
+  category           String?
+  categorySource     String   @default("auto") @map("category_source") // auto | manual
+  categoryConfidence Decimal? @map("category_confidence")
+  categoryReasoning  String?  @map("category_reasoning") // razon corta del modelo, para auditar mal-clasificaciones
+  categorizedAt      DateTime? @map("categorized_at")
+
+  // --- Enriquecimiento (pantalla 2) ---
+  // PESTEL: guarda las claves de config/pestel.ts (political, economic, ...) y no las
+  // etiquetas, para poder cambiar como se muestran sin migrar datos. Hasta 2026-08-09
+  // era siempre a mano; ahora el job de src/lib/jobs/pestel.ts la sugiere sobre likes
+  // de las ultimas 2 semanas, maximo 2 dimensiones por item — igual que category,
+  // 'manual' congela el valor para que el job no lo pise. El default de la columna es
+  // 'auto' para lo nuevo; la migracion que la agrega marca todo lo existente como
+  // 'manual' a proposito, para que el job nunca toque el historico (decision de Frida).
+  pestel       String[] @default([])
+  pestelSource String   @default("auto") @map("pestel_source") // auto | manual
+
+  // Impacto y "por que importa" los escribe el modelo (job analyze) y Frida los puede
+  // corregir con doble click. `*Source` = 'manual' congela el texto: el job no lo pisa,
+  // igual que categorySource (PLAN 3.3).
+  // TL;DR de ~100 palabras sobre lo que trata el tweet/articulo. Primera columna de
+  // la tabla de analisis; se genera junto con impact y whyMatters en el mismo job.
+  tldr            String?
+  tldrSource      String    @default("auto") @map("tldr_source") // auto | manual
+  tldrGeneratedAt DateTime? @map("tldr_generated_at")
+
+  impact            String?
+  impactSource      String    @default("auto") @map("impact_source") // auto | manual
+  impactGeneratedAt DateTime? @map("impact_generated_at")
+
+  // Se genera despues de impact y con impact como contexto, asi que puede existir un
+  // item con impact y sin whyMatters (corrida cortada por presupuesto de tiempo).
+  whyMatters            String?   @map("why_matters")
+  whyMattersSource      String    @default("auto") @map("why_matters_source") // auto | manual
+  whyMattersGeneratedAt DateTime? @map("why_matters_generated_at")
+
+  // Foresight: como puede cambiar esto el desarrollo de la IA y la interaccion entre
+  // humanos. Lo escribe Claude (claude-opus-5, src/lib/foresight.ts) a partir del
+  // TL;DR y del "por que importa" ya generados, asi que va al final de la cadena del
+  // job analyze. Columna a la derecha de Impacto en la tabla de analisis; solo se ve
+  // en el back (enrich), no en /senales.
+  foresight            String?
+  foresightSource      String    @default("auto") @map("foresight_source") // auto | manual
+  foresightGeneratedAt DateTime? @map("foresight_generated_at")
+
+  // Descartado de la tabla de enriquecimiento, NO del catalogo: el item sigue en la
+  // pantalla de likes y conserva categoria y textos. Solo deja de ocupar una fila en
+  // la tabla que Frida trabaja a mano, y el job de analisis deja de gastarle llamadas.
+  enrichDiscarded Boolean @default(false) @map("enrich_discarded")
+
+  // --- Fase 2 del paywall: que ve el cliente pagante (Fase 3+) ---
+  // pending -> sin revisar. published -> visible a miembros. "No relevante" no es
+  // un tercer valor aparte: se unificó con enrichDiscarded (un solo botón, una
+  // sola lista de excluidos — decisión de Frida, 2026-08-09). El paso a
+  // "published" lo valida el server: requiere category + impact + whyMatters
+  // (ver src/lib/publish.ts).
+  publishStatus String    @default("pending") @map("publish_status")
+  publishedAt   DateTime? @map("published_at")
+
+  // --- Grafo semantico (pestaña 03, solo admin por ahora) ---
+  // Embedding del texto de la señal (tldr + whyMatters + titulo), generado por el
+  // job de embeddings contra un Ollama local (ollama.com no hostea modelos de
+  // embeddings — verificado 2026-08-19, su catalogo cloud de embeddings esta vacio).
+  // `Unsupported` porque Prisma no habla pgvector: se lee/escribe con $queryRaw.
+  // embeddingHash = sha256 del texto embebido; si Frida edita el TL;DR a mano el
+  // hash deja de coincidir y el job re-embebe solo ese item.
+  embedding     Unsupported("vector(768)")?
+  embeddingHash String?                     @map("embedding_hash")
+  embeddedAt    DateTime?                   @map("embedded_at")
+  // Comunidad tematica detectada sobre el grafo (src/lib/jobs/clusters.ts).
+  // Nullable: señales sueltas o en grupos demasiado chicos quedan sin tema.
+  clusterId     String?                     @map("cluster_id")
+  cluster       SemanticCluster?            @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  // Vitalidad de la señal (src/lib/jobs/graph.ts): 0.5^(dias desde likedAt/30),
+  // reanimada por vecinas recientes. La escribe cada corrida del grafo; el canvas
+  // la usa como opacidad/tamaño. Decision de Frida (2026-08-20): vida media 30 dias.
+  vitality      Float?
+  vitalityAt    DateTime?                   @map("vitality_at")
+
+  customFields LikedItemCustomField[]
+  favorites    Favorite[]
+  linksAsA     SemanticLink[]         @relation("SemanticLinkA")
+  linksAsB     SemanticLink[]         @relation("SemanticLinkB")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([likedAt(sort: Desc)])
+  @@index([category])
+  @@index([fetchStatus])
+  @@index([enrichDiscarded])
+  @@index([publishStatus])
+  @@map("liked_items")
+}
+
+// Arista del grafo semantico: similitud coseno entre dos señales publicadas, por
+// encima del umbral del job (src/lib/jobs/embed.ts). El par va ordenado
+// (itemAId < itemBId) para que la unique constraint deduplique A-B y B-A.
+// Las aristas viven en Postgres, no en memoria: el grafo se arma con un SELECT.
+model SemanticLink {
+  id      String @id @default(uuid())
+  itemAId String @map("item_a_id")
+  itemBId String @map("item_b_id")
+  score   Float
+
+  itemA LikedItem @relation("SemanticLinkA", fields: [itemAId], references: [id], onDelete: Cascade)
+  itemB LikedItem @relation("SemanticLinkB", fields: [itemBId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([itemAId, itemBId])
+  @@index([itemBId])
+  @@map("semantic_links")
+}
+
+// Tema del grafo: comunidad de señales densamente conectadas entre si, detectada
+// por el job de clusters y bautizada por el modelo (nombre + por que van juntas).
+// Desde 2026-08-20 la fila es un LINAJE: sobrevive entre corridas (se empareja con
+// la comunidad nueva por solapamiento de miembros, ver graph.ts), acumula
+// indicadores y puede morir y resucitar. membersHash = sha256 de los ids ordenados
+// de sus miembros: si no cambio, el nombre se conserva sin llamar al modelo.
+model SemanticCluster {
+  id          String @id @default(uuid())
+  name        String
+  summary     String
+  membersHash String @map("members_hash")
+  size        Int
+
+  // alive | dead. Muerto = vitalidad < 1 o no detectado en la ultima corrida. Se
+  // conserva (fosil) y resucita si vuelve a aparecer con vitalidad (decision de
+  // Frida: la muerte es reversible).
+  status       String    @default("alive")
+  firstSeenAt  DateTime  @default(now()) @map("first_seen_at")
+  lastSignalAt DateTime? @map("last_signal_at")
+  diedAt       DateTime? @map("died_at")
+  revivedCount Int       @default(0) @map("revived_count")
+  vitality     Float     @default(0)
+  // Ultima membresia conocida: sirve para emparejar linajes entre corridas y para
+  // saber que señales tuvo un tema muerto (sus items ya tienen clusterId null).
+  lastMemberIds String[] @default([]) @map("last_member_ids")
+
+  // Horizonte (H1 | H2 | H3). `horizon` es el efectivo; `horizonSuggested` lo que
+  // la heuristica propone en cada corrida. horizonSource='manual' congela el
+  // efectivo (mismo patron que categorySource).
+  horizon          String? 
+  horizonSuggested String? @map("horizon_suggested")
+  horizonSource    String  @default("auto") @map("horizon_source")
+
+  // Indicadores de la ultima corrida (el historial vive en graph_snapshot_clusters).
+  velocity30d     Int    @default(0) @map("velocity_30d")
+  velocityPrev30d Int    @default(0) @map("velocity_prev_30d")
+  density         Float? 
+  connectivity    Float? 
+  novelty         Float? 
+  bridgeClusters  Int    @default(0) @map("bridge_clusters")
+
+  items     LikedItem[]
+  snapshots GraphSnapshotCluster[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([membersHash])
+  @@map("semantic_clusters")
+}
+
+// Una fila por corrida del grafo (refreshGraph). Es la base de la evolucion
+// temporal: con dos o mas snapshots se ve nacer, crecer y apagarse a los temas.
+model GraphSnapshot {
+  id            String   @id @default(uuid())
+  takenAt       DateTime @default(now()) @map("taken_at")
+  // embed | cron | publish | manual: que disparo la corrida.
+  trigger       String
+  nodes         Int
+  links         Int
+  clustersAlive Int @map("clusters_alive")
+  clustersDead  Int @map("clusters_dead")
+  orphans       Int
+
+  clusters GraphSnapshotCluster[]
+  members  GraphSnapshotMember[]
+
+  @@index([takenAt(sort: Desc)])
+  @@map("graph_snapshots")
+}
+
+// Serie temporal por tema: como estaba cada linaje en cada snapshot.
+model GraphSnapshotCluster {
+  id         String @id @default(uuid())
+  snapshotId String @map("snapshot_id")
+  clusterId  String @map("cluster_id")
+
+  name             String
+  size             Int
+  status           String
+  vitality         Float
+  velocity30d      Int     @map("velocity_30d")
+  density          Float?
+  connectivity     Float?
+  novelty          Float?
+  horizon          String?
+  horizonSuggested String? @map("horizon_suggested")
+
+  snapshot GraphSnapshot   @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  cluster  SemanticCluster @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, clusterId])
+  @@index([clusterId])
+  @@map("graph_snapshot_clusters")
+}
+
+// Membresia señal→tema en cada snapshot, con la vitalidad de ese momento. Es lo
+// que permite reconstruir el grafo de cualquier fecha (slider, PR 2).
+model GraphSnapshotMember {
+  snapshotId String  @map("snapshot_id")
+  itemId     String  @map("item_id")
+  clusterId  String? @map("cluster_id")
+  vitality   Float
+
+  snapshot GraphSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, itemId])
+  @@map("graph_snapshot_members")
+}
+
+// Columnas extra que Frida agrega desde la pantalla de enriquecimiento.
+// Existen aunque ningun item tenga valor todavia: la columna se ve vacia en la
+// tabla en vez de desaparecer hasta que alguien la llene.
+model CustomFieldDefinition {
+  id        String   @id @default(uuid())
+  fieldKey  String   @unique @map("field_key")
+  position  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("custom_field_definitions")
+}
+
+model LikedItemCustomField {
+  id          String    @id @default(uuid())
+  likedItemId String    @map("liked_item_id")
+  likedItem   LikedItem @relation(fields: [likedItemId], references: [id], onDelete: Cascade)
+  fieldKey    String    @map("field_key")
+  fieldValue  String?   @map("field_value")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([likedItemId, fieldKey])
+  @@map("liked_item_custom_fields")
+}
+
+model IngestionCursor {
+  id                    String    @id @default(uuid())
+  lastTweetId           String?   @map("last_tweet_id")
+  lastRunAt             DateTime? @map("last_run_at")
+  // Estado de la ultima corrida, para que la UI pueda avisar cosas como
+  // "necesitas recargar creditos en X" sin tener que volver a correr el job.
+  lastStatus            String    @default("idle") @map("last_status") // idle | ok | error_credits_depleted | error
+  lastError             String?   @map("last_error")
+  // Backfill en progreso: si una corrida se corta por el tope de paginas sin
+  // llegar a last_tweet_id ni al final del historial, se guarda aqui el
+  // pagination_token de X para retomar exactamente donde se quedo, y el
+  // tweet_id mas reciente visto en este ciclo (para fijarlo como el nuevo
+  // last_tweet_id solo cuando el ciclo termine de verdad).
+  resumePaginationToken String?   @map("resume_pagination_token")
+  pendingNewestTweetId  String?   @map("pending_newest_tweet_id")
+  // Extremos del orden de likes ya asignados (rank mas alto = like mas reciente).
+  // Los likes nuevos se numeran por encima de maxLikeRank; el backfill, por debajo
+  // de minLikeRank. Asi el orden global sobrevive entre corridas.
+  maxLikeRank Int? @map("max_like_rank")
+  minLikeRank Int? @map("min_like_rank")
+  // Se corta el backfill al llegar a esta antiguedad (ver BACKFILL_WINDOW_MONTHS).
+  backfillReachedWindow Boolean  @default(false) @map("backfill_reached_window")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("ingestion_cursor")
+}
+
+// Overrides de los system prompts del análisis (impacto y "por qué importa"),
+// editables desde la pantalla de Sistema. Si no hay fila para una clave, rige el
+// default hardcodeado en src/lib/analysis-prompts.ts. Solo dos claves hoy:
+// "impact" y "why_matters".
+model PromptSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("prompt_settings")
+}

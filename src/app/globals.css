@@ -1,0 +1,333 @@
+@import "tailwindcss";
+
+/* AI THE NEW SEXY — sistema de diseño
+   ===================================
+   Implementa DESIGN.md. La regla de oro de ese documento es que todo debe sentirse
+   como "una organizacion de investigacion en IA documentando sistemas reales": Swiss
+   editorial + documentacion tecnica + UI industrial. De ahi salen las tres decisiones
+   que mas se notan aqui:
+
+     1. Blanco calido y negro como estructura; naranja, rosa y azul SOLO como acento.
+     2. Geometria rectangular — el radio de borde se anula globalmente mas abajo.
+     3. Monospace para todo lo que es metadata (labels, estados, encabezados de tabla),
+        que es lo que le da el tono de instrumento y no de SaaS. */
+
+:root {
+  /* Paleta de marca (DESIGN.md §3). Estos son los unicos colores de la marca; todo
+     lo demas se deriva de ellos. */
+  --brand-orange: #ff4d00; /* Signal Orange — señal y accion. Con moderacion. */
+  --brand-black: #0a0a0a; /* System Black — estructura */
+  --brand-white: #f7f7f5; /* Base White — blanco calido, nunca #fff puro de fondo */
+  --brand-grey: #bfbfbf; /* Steel Grey — divisores, metadata, secundario */
+  --brand-blue: #8fb7d9; /* Tech Blue — sistemas y contenido tecnico */
+  --brand-pink: #ff5c8a; /* Human Pink — dimension humana */
+
+  /* --- Tokens semanticos. Los componentes usan estos, no los de marca. --- */
+
+  /* El "primario" es negro, no naranja: el naranja se gasta si lo lleva cada boton
+     de una tabla de 50 filas. El naranja entra en hover, foco y estados. */
+  --color-primary: var(--brand-black);
+  --color-primary-hover: var(--brand-orange);
+  --color-primary-focus: var(--brand-orange);
+  --color-on-primary: var(--brand-white);
+
+  --color-accent: var(--brand-orange);
+  --color-accent-human: var(--brand-pink);
+  --color-accent-tech: var(--brand-blue);
+
+  --color-ink: #0a0a0a;
+  --color-ink-muted: #3a3a38;
+  --color-ink-subtle: #63635f;
+  --color-ink-tertiary: #8a8a85;
+
+  /* La escalera va del blanco calido de fondo al blanco puro de los modulos: una card
+     "sube" hacia el blanco, al reves que en un tema gris. */
+  --color-canvas: #f7f7f5;
+  --color-surface-1: #ffffff;
+  --color-surface-2: #eeeeeb;
+  --color-surface-3: #e4e4e0;
+  --color-surface-4: #d9d9d4;
+
+  --color-hairline: #dcdcd7;
+  --color-hairline-strong: var(--brand-grey);
+  --color-hairline-tertiary: var(--brand-black);
+
+  --color-success: #1f7a4d;
+  --color-danger: #c0231a;
+}
+
+@theme inline {
+  --color-brand-orange: var(--brand-orange);
+  --color-brand-black: var(--brand-black);
+  --color-brand-white: var(--brand-white);
+  --color-brand-grey: var(--brand-grey);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-pink: var(--brand-pink);
+
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-focus: var(--color-primary-focus);
+  --color-on-primary: var(--color-on-primary);
+
+  --color-accent: var(--color-accent);
+  --color-accent-human: var(--color-accent-human);
+  --color-accent-tech: var(--color-accent-tech);
+
+  --color-ink: var(--color-ink);
+  --color-ink-muted: var(--color-ink-muted);
+  --color-ink-subtle: var(--color-ink-subtle);
+  --color-ink-tertiary: var(--color-ink-tertiary);
+
+  --color-canvas: var(--color-canvas);
+  --color-surface-1: var(--color-surface-1);
+  --color-surface-2: var(--color-surface-2);
+  --color-surface-3: var(--color-surface-3);
+  --color-surface-4: var(--color-surface-4);
+
+  --color-hairline: var(--color-hairline);
+  --color-hairline-strong: var(--color-hairline-strong);
+  --color-hairline-tertiary: var(--color-hairline-tertiary);
+
+  --color-success: var(--color-success);
+  --color-danger: var(--color-danger);
+
+  --font-sans: var(--font-inter);
+  --font-display: var(--font-inter-tight);
+  --font-mono: var(--font-plex-mono);
+
+  /* Geometria rectangular (DESIGN.md §10 y §24: "evitar border-radius excesivo",
+     "no usar interfaces excesivamente redondeadas"). Se anula la escala completa en
+     vez de ir clase por clase: cualquier `rounded-*` que ya exista o que se escriba
+     despues queda recto por default. */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-2xl: 0px;
+  --radius-3xl: 0px;
+  --radius-4xl: 0px;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  letter-spacing: -0.05px;
+}
+
+/* Franjas que scrollean horizontal en movil (la nav): el contenido se desplaza pero
+   la barra de scroll romperia la hairline de abajo. */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* El foco se marca en Signal Orange: es un estado, que es exactamente para lo que la
+   marca reserva ese color. */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--brand-orange);
+  outline-offset: 1px;
+}
+
+/* Identidad por seccion
+   ---------------------
+   Antes cada pantalla tenia su propia fuente de display. Eso choca con una marca que
+   se define como sistematica y modular, asi que ahora la tipografia es una sola y lo
+   que cambia por pantalla es el numero de seccion, al estilo `01 — SYSTEM OVERVIEW`
+   de DESIGN.md §18. El contenedor de cada pagina sigue llevando `data-section`, asi
+   que agregar una pantalla es agregar un bloque aqui y nada mas. */
+
+[data-section] {
+  --section-index: "";
+  --section-label: "";
+}
+
+[data-section="likes"] {
+  --section-index: "01";
+  --section-label: "CATÁLOGO";
+}
+
+[data-section="enrich"] {
+  --section-index: "02";
+  --section-label: "ANÁLISIS";
+}
+
+[data-section="grafo"] {
+  --section-index: "03";
+  --section-label: "GRAFO";
+}
+
+[data-section="horizontes"] {
+  --section-index: "04";
+  --section-label: "HORIZONTES";
+}
+
+[data-section="categorias"] {
+  --section-index: "05";
+  --section-label: "TAXONOMÍA";
+}
+
+[data-section="conexion"] {
+  --section-index: "06";
+  --section-label: "SISTEMA";
+}
+
+[data-section="usuarios"] {
+  --section-index: "07";
+  --section-label: "USUARIOS";
+}
+
+/* Secciones del member: su nav numera aparte (01 Categorías, 02 Señales). */
+[data-section="explora"] {
+  --section-index: "01";
+  --section-label: "CATEGORÍAS";
+}
+
+[data-section="senales"] {
+  --section-index: "02";
+  --section-label: "SEÑALES";
+}
+
+[data-section="horizontes-member"] {
+  --section-index: "03";
+  --section-label: "HORIZONTES";
+}
+
+/* Level 1 — Hero (DESIGN.md §6): display bold, grande, tracking cerrado. */
+.section-title {
+  font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 2.25rem;
+  line-height: 1.05;
+  letter-spacing: -1.2px;
+  text-transform: uppercase;
+}
+
+/* El numero de seccion va arriba del titulo, en mono y naranja: es el "pequeño titulo"
+   que la marca sí pinta de Signal Orange. Se genera desde CSS para que las paginas no
+   tengan que repetir el markup. */
+.section-title::before {
+  content: var(--section-index) "  /  " var(--section-label);
+  display: block;
+  margin-bottom: 0.625rem;
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: none;
+  color: var(--brand-orange);
+}
+
+/* Level 3 — Supporting headline. */
+.section-heading {
+  font-family: var(--font-display), var(--font-sans), sans-serif;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  line-height: 1.3;
+  letter-spacing: -0.2px;
+}
+
+/* Level 5 — Metadata. Labels tecnicos, encabezados de tabla, estados, navegacion.
+   Es la clase que mas trabaja del sistema: casi todo lo que no es prosa la usa. */
+.label-mono {
+  font-family: var(--font-mono), ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+/* Navegacion: mono, y la seccion activa se marca con una barra naranja arriba en vez
+   de con un fondo gris. Indicador, no relleno. */
+.nav-label {
+  font-family: var(--font-mono), ui-monospace, monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.nav-label-active {
+  color: var(--color-ink);
+  box-shadow: inset 0 2px 0 0 var(--brand-orange);
+}
+
+/* Focus frame (DESIGN.md §13): esquinas abiertas que enmarcan sin encerrar. Se usa en
+   los estados vacios, donde un borde punteado completo se veria como un placeholder de
+   maqueta y no como parte del sistema. */
+.focus-frame {
+  position: relative;
+  border: 1px solid var(--color-hairline);
+}
+
+.focus-frame::before,
+.focus-frame::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--brand-orange);
+}
+
+.focus-frame::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+
+.focus-frame::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Landing (visitante anonimo)
+   ---------------------------
+   La landing vende el banco con los mismos materiales del sistema — grid tecnico,
+   metadata en mono, modulos con hairline — no con recursos de landing de SaaS
+   (§24: sin gradients, sin glass, sin blobs). */
+
+/* Reticula de fondo del hero (§9: "grids visibles"). Se desvanece hacia abajo para
+   estructurar sin competir con el titular. */
+.landing-grid {
+  background-image:
+    linear-gradient(var(--color-hairline) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-hairline) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: linear-gradient(to bottom, black 25%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black 25%, transparent);
+}
+
+/* Cinta de taxonomia: el track lleva el contenido dos veces y se desplaza -50%, asi
+   el loop no tiene costura. Pausa al hover para poder leerla. */
+.marquee {
+  overflow: hidden;
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee-scroll 48s linear infinite;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@keyframes marquee-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-track {
+    animation: none;
+  }
+}
