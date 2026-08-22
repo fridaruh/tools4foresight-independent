@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { SyncButton } from "@/components/SyncButton";
 import { LogoutButton } from "@/components/LogoutButton";
 import { UserMenu } from "@/components/UserMenu";
+import { GuideHelpButton } from "@/components/onboarding/guide-widget";
 
 // `section` empata con los bloques [data-section] de globals.css. El numero se
 // muestra junto a la etiqueta: la nav es el indice del documento.
@@ -83,6 +84,9 @@ export function TopNav({
         {role !== null ? (
           <div className="ml-auto flex min-w-0 items-center gap-2 sm:gap-4">
             <SyncButton />
+            {/* Reabre la guía de configuración. Se pinta solo si el onboarding
+                está montado (o sea, con sesión): ver src/components/onboarding. */}
+            <GuideHelpButton />
             {user ? <UserMenu user={user} /> : <LogoutButton />}
           </div>
         ) : pathname === "/login" ? null : (

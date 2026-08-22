@@ -3,7 +3,9 @@ import Script from "next/script";
 import { IBM_Plex_Mono, Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import { TopNav } from "@/components/TopNav";
-import { getEffectiveRole, getSessionUser } from "@/lib/require-user";
+import { Onboarding, OnboardingProvider } from "@/components/onboarding";
+import { getOnboardingFacts } from "@/lib/onboarding/facts";
+import { getSessionUser } from "@/lib/require-user";
 
 // Las tres voces del sistema (DESIGN.md §5). Una sola familia por funcion en toda la
 // app: la variedad tipografica por pantalla que habia antes contradice el "sistematico
@@ -49,7 +51,22 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const [role, sessionUser] = await Promise.all([getEffectiveRole(), getSessionUser()]);
+  const sessionUser = await getSessionUser();
+  const role = sessionUser?.role ?? null;
+
+  // El onboarding se superpone a la app: no tiene ruta propia ni gate en el
+  // proxy, y sin sesión no se monta nada. Las "facts" son el estado real del
+  // tenant (X conectada, key guardada, señales publicadas…), con las que la
+  // guía verifica sus tareas en vez de creerle a un checkbox — ver
+  // src/lib/onboarding/facts.ts.
+  const facts = sessionUser ? await getOnboardingFacts(sessionUser.userId) : null;
+
+  const nav = (
+    <TopNav
+      role={role}
+      user={sessionUser ? { name: sessionUser.name, email: sessionUser.email } : null}
+    />
+  );
 
   return (
     <html
@@ -63,11 +80,18 @@ export default async function RootLayout({
           data-domain="tools4foresight.com"
           strategy="afterInteractive"
         />
-        <TopNav
-          role={role}
-          user={sessionUser ? { name: sessionUser.name, email: sessionUser.email } : null}
-        />
-        {children}
+        {sessionUser && facts ? (
+          <OnboardingProvider userId={sessionUser.userId} facts={facts}>
+            {nav}
+            {children}
+            <Onboarding />
+          </OnboardingProvider>
+        ) : (
+          <>
+            {nav}
+            {children}
+          </>
+        )}
       </body>
     </html>
   );

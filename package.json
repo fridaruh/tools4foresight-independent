@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "vitest run",
     "qa": "tsx scripts/qa-all.ts",
     "db:app-role": "tsx scripts/setup-app-role.ts",
     "rotate:key": "tsx scripts/rotate-encryption-key.ts",
@@ -26,6 +27,7 @@
     "@prisma/client": "^7.9.0",
     "@vercel/functions": "^3.9.5",
     "better-auth": "^1.6.26",
+    "lucide-react": "^1.33.0",
     "next": "16.2.12",
     "pg": "^8.22.0",
     "react": "19.2.4",
@@ -35,15 +37,20 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^20",
     "@types/pg": "^8.20.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
+    "jsdom": "^30.0.1",
     "prisma": "^7.9.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.12",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }
