@@ -288,15 +288,15 @@ export type TourStep = {
 
 export const TOUR_STEPS: TourStep[] = [
   {
-    title: "¡Hola! Bienvenido a Individual",
+    title: "¡Hola! Bienvenido a Tools 4 Foresight",
     bubble: "Tu banco de señales en menos de 5 minutos",
     bubbleHighlight: "5 minutos",
     description:
-      'Individual convierte lo que le das like en X en señales de foresight: categorizadas, analizadas y conectadas en un mapa de temas. Te enseño cómo funciona en un par de minutos. Dale a "Siguiente" cuando quieras.',
+      'Tools 4 Foresight convierte lo que le das like en X en señales de foresight: categorizadas, analizadas y conectadas en un mapa de temas. Te enseño cómo funciona en un par de minutos. Dale a "Siguiente" cuando quieras.',
     cta: "Siguiente",
   },
   {
-    title: "Así fluye una señal en Individual",
+    title: "Así fluye una señal en Tools 4 Foresight",
     flow: [
       "Conecta tu cuenta de X en Sistema",
       "La ingesta trae tus likes al Catálogo",

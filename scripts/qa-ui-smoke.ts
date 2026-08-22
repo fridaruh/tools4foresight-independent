@@ -6,7 +6,7 @@
  * Levanta `next dev -p 3123` como proceso hijo contra la DB real (.env.local),
  * espera a que imprima "Ready" y hace cuatro peticiones sin cookie de sesión:
  *
- *   - GET  /                         -> 200, contiene "tools4foresight"
+ *   - GET  /                         -> 200, contiene "Tools 4 Foresight"
  *     (landing pública o cockpit, según haya sesión — sin cookie es la landing).
  *   - GET  /conexion                 -> 307 a /login (el proxy corta antes de
  *     llegar a la página: ver src/proxy.ts).
@@ -83,7 +83,7 @@ async function main() {
     const root = await fetch(`${BASE_URL}/`);
     const rootBody = await root.text();
     check("GET / -> 200", root.status === 200, `status=${root.status}`);
-    check("GET / contiene 'tools4foresight'", rootBody.includes("tools4foresight"));
+    check("GET / contiene 'Tools 4 Foresight'", rootBody.includes("Tools 4 Foresight"));
 
     // GET /conexion sin sesión -> el proxy redirige a /login antes de tocar la
     // página (307, no sigue el redirect para poder inspeccionar el código).

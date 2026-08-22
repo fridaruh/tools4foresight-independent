@@ -87,7 +87,7 @@ export function WelcomeTour() {
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src="/icon.png"
-                alt="Individual"
+                alt="Tools 4 Foresight"
                 width={120}
                 height={120}
                 className="h-[120px] w-[120px] object-contain"

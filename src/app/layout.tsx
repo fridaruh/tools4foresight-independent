@@ -41,7 +41,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "tools4foresight — Señales, no ruido",
+  title: "Tools 4 Foresight — Señales, no ruido",
   description:
     "Banco curado de señales sobre IA, tecnología y cultura, con análisis de impacto — no solo el link.",
 };

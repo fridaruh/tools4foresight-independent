@@ -107,7 +107,7 @@ export function GuideWidget() {
           </span>
           <p className="mb-1 font-display text-[13px] font-semibold text-ink">¡Guía completada!</p>
           <p className="mb-4 text-[12px] leading-relaxed text-ink-subtle">
-            Ya configuraste lo esencial de Individual. Puedes volver a abrir esta guía cuando
+            Ya configuraste lo esencial de Tools 4 Foresight. Puedes volver a abrir esta guía cuando
             quieras desde el icono de ayuda.
           </p>
           <button

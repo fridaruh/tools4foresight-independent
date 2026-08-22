@@ -138,7 +138,7 @@ function Landing() {
       className="landing-grid flex flex-1 flex-col items-center justify-center gap-8 px-6 py-24 text-center"
     >
       <div className="flex flex-col items-center gap-4">
-        <h1 className="section-title text-ink">tools4foresight</h1>
+        <h1 className="section-title text-ink">Tools 4 Foresight</h1>
         <p className="max-w-md text-base leading-relaxed text-ink-subtle">
           Conecta tu cuenta de X y convierte tus likes en un banco de señales categorizado, con
           análisis de impacto y un grafo de temas — no solo el link guardado.
