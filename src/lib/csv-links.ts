@@ -6,7 +6,7 @@ import { InvalidLinkError, normalizeLinkUrl } from "@/lib/manual-link";
  * por fila. Si la fila trae más columnas (CSV real, no una lista de URLs) se toma
  * solo la primera celda — esto no es un importador de metadata, solo de enlaces.
  */
-export const MAX_CSV_ROWS = 500;
+export const MAX_CSV_ROWS = 1000;
 
 export class CsvTooLargeError extends Error {}
 

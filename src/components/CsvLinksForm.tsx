@@ -59,7 +59,7 @@ export function CsvLinksForm() {
       <h2 className="label-mono text-ink-tertiary">Cargar enlaces por CSV</h2>
       <p className="text-xs text-ink-tertiary">
         Un archivo con una URL por línea. El contenido y el análisis de cada enlace se procesan
-        después, en automático — igual que un enlace agregado a mano. Máximo 500 por carga.
+        después, en automático — igual que un enlace agregado a mano. Máximo 1000 por carga.
       </p>
       <form onSubmit={upload} className="flex flex-wrap items-center gap-3">
         <input
