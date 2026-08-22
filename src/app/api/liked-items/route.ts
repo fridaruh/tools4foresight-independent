@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { tenantClient } from "@/lib/tenant-db";
 import { buildWhere, filtersFromSearchParams } from "@/lib/liked-items-query";
 import { toBoardItem } from "@/lib/board-item";
 import { InvalidLinkError, manualItemInput, normalizeLinkUrl } from "@/lib/manual-link";
@@ -19,10 +19,7 @@ export async function GET(request: NextRequest) {
   // Ya no hay recorte por rol: cada usuario es dueño de su banco y lo ve completo.
   // El alcance lo pone el ownerId. `scope=published` sigue existiendo como filtro
   // opcional de la UI, no como regla de seguridad.
-  // TODO(fase4): pasar esta lectura por tenantClient(user.userId) en vez de filtrar
-  // a mano aqui.
   const where = buildWhere(filters);
-  where.ownerId = user.userId;
   if (searchParams.get("scope") === "published") {
     where.publishStatus = "published";
   }
@@ -30,14 +27,15 @@ export async function GET(request: NextRequest) {
   // Paginacion por offset y no por cursor: el orden es por `likedAt`, que tiene
   // empates (varios items historicos comparten fecha), y un cursor sobre un campo
   // no unico se salta filas.
+  const client = tenantClient(user.userId);
   const [items, total] = await Promise.all([
-    prisma.likedItem.findMany({
+    client.likedItem.findMany({
       where,
       orderBy: [{ likedAt: "desc" }, { tweetId: "desc" }],
       take: limit,
       skip: offset,
     }),
-    prisma.likedItem.count({ where }),
+    client.likedItem.count({ where }),
   ]);
 
   return NextResponse.json({
@@ -73,8 +71,9 @@ export async function POST(request: NextRequest) {
   // Se busca por las dos columnas: un enlace que ya llego por un like de X vive en
   // `contentUrl`, y uno agregado a mano en las dos. Agregarlo otra vez duplicaria la
   // fila en el catalogo sin que nada mas lo impida (el unique es sobre `tweetId`).
-  const existing = await prisma.likedItem.findFirst({
-    where: { ownerId: user.userId, OR: [{ contentUrl: url }, { tweetUrl: url }] },
+  const client = tenantClient(user.userId);
+  const existing = await client.likedItem.findFirst({
+    where: { OR: [{ contentUrl: url }, { tweetUrl: url }] },
     include: { customFields: true },
   });
   if (existing) {
@@ -84,7 +83,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const item = await prisma.likedItem.create({
+  const item = await client.likedItem.create({
     data: manualItemInput(url, user.userId),
     include: { customFields: true },
   });

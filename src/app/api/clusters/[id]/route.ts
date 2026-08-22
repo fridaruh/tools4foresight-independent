@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireAdminApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
+import { withOwner } from "@/lib/tenant-db";
 import { isHorizon } from "@/lib/horizons";
 
 type Body = {
@@ -11,8 +11,8 @@ type Body = {
 // Mismo patron que categorySource: fijar a mano congela el valor y el job deja
 // de pisarlo; mandar null devuelve el control a la heuristica.
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const denied = await requireAdminApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const { id } = await params;
   const body = (await request.json()) as Body;
@@ -21,19 +21,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     return NextResponse.json({ error: "horizon inválido" }, { status: 400 });
   }
 
-  const existing = await prisma.semanticCluster.findUnique({
-    where: { id },
-    select: { horizonSuggested: true },
-  });
-  if (!existing) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+  const result = await withOwner(user.userId, async (tx) => {
+    const existing = await tx.semanticCluster.findFirst({
+      where: { id, ownerId: user.userId },
+      select: { horizonSuggested: true },
+    });
+    if (!existing) return null;
 
-  const cluster = await prisma.semanticCluster.update({
-    where: { id },
-    data:
-      body.horizon === null
-        ? { horizon: existing.horizonSuggested, horizonSource: "auto" }
-        : { horizon: body.horizon, horizonSource: "manual" },
-    select: { id: true, horizon: true, horizonSuggested: true, horizonSource: true },
+    await tx.semanticCluster.updateMany({
+      where: { id, ownerId: user.userId },
+      data:
+        body.horizon === null
+          ? { horizon: existing.horizonSuggested, horizonSource: "auto" }
+          : { horizon: body.horizon, horizonSource: "manual" },
+    });
+
+    // Obtener el cluster actualizado
+    return tx.semanticCluster.findFirst({
+      where: { id, ownerId: user.userId },
+      select: { id: true, horizon: true, horizonSuggested: true, horizonSource: true },
+    });
   });
-  return NextResponse.json({ cluster });
+
+  if (!result) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+  return NextResponse.json({ cluster: result });
 }

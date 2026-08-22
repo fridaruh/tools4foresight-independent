@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { tenantClient } from "@/lib/tenant-db";
 import { requireUserApi } from "@/lib/require-user";
 
 export async function GET() {
   const user = await requireUserApi();
   if (user instanceof NextResponse) return user;
 
-  const fields = await prisma.customFieldDefinition.findMany({
-    where: { ownerId: user.userId },
+  const client = tenantClient(user.userId);
+  const fields = await client.customFieldDefinition.findMany({
     orderBy: [{ position: "asc" }, { createdAt: "asc" }],
   });
   return NextResponse.json({ fields });
@@ -26,16 +26,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Falta el nombre de la columna" }, { status: 400 });
   }
 
-  const existing = await prisma.customFieldDefinition.findUnique({
-    where: { ownerId_fieldKey: { ownerId: user.userId, fieldKey: key } },
+  const client = tenantClient(user.userId);
+  const existing = await client.customFieldDefinition.findFirst({
+    where: { fieldKey: key },
   });
   if (existing) {
     return NextResponse.json({ error: "Ya existe una columna con ese nombre" }, { status: 409 });
   }
 
-  const count = await prisma.customFieldDefinition.count({ where: { ownerId: user.userId } });
-  const field = await prisma.customFieldDefinition.create({
-    data: { ownerId: user.userId, fieldKey: key, position: count },
+  const count = await client.customFieldDefinition.count();
+  const field = await client.customFieldDefinition.create({
+    data: { fieldKey: key, position: count, ownerId: user.userId },
   });
 
   return NextResponse.json({ field }, { status: 201 });
@@ -49,9 +50,10 @@ export async function DELETE(request: NextRequest) {
   if (!key) return NextResponse.json({ error: "Falta fieldKey" }, { status: 400 });
 
   // Borra la definicion y los valores que ya se hayan capturado en esa columna.
-  await prisma.$transaction([
-    prisma.likedItemCustomField.deleteMany({ where: { ownerId: user.userId, fieldKey: key } }),
-    prisma.customFieldDefinition.deleteMany({ where: { ownerId: user.userId, fieldKey: key } }),
+  const client = tenantClient(user.userId);
+  await client.$transaction([
+    client.likedItemCustomField.deleteMany({ where: { fieldKey: key } }),
+    client.customFieldDefinition.deleteMany({ where: { fieldKey: key } }),
   ]);
 
   return NextResponse.json({ ok: true });

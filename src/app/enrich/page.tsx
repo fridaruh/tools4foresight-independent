@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
 import { EnrichTable, type EnrichRow } from "@/components/EnrichTable";
 import { EnrichFiltersBar } from "@/components/EnrichFiltersBar";
 import { RunJobButton } from "@/components/RunJobButton";
 import { toBoardItem } from "@/lib/board-item";
 import { buildWhere, filtersFromSearchParams } from "@/lib/liked-items-query";
 import { ANALYSIS_WINDOW } from "@/lib/jobs/analyze";
-import { requireAdminPage } from "@/lib/require-admin";
+import { requireUserPage } from "@/lib/require-user";
 import { isPublishStatus, type PublishStatus } from "@/lib/publish";
+import { withOwner } from "@/lib/tenant-db";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export default async function EnrichPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  await requireAdminPage();
+  const { userId } = await requireUserPage();
 
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(await searchParams)) {
@@ -46,24 +46,29 @@ export default async function EnrichPage({
   const page = Math.max(Number(params.get("page")) || 1, 1);
   const offset = (page - 1) * PAGE_SIZE;
 
-  const [items, total, definitions, grouped, discardedCount, statusCounts] = await Promise.all([
-    prisma.likedItem.findMany({
-      where,
-      orderBy: [{ likedAt: "desc" }, { tweetId: "desc" }],
-      take: PAGE_SIZE,
-      skip: offset,
-      include: { customFields: true },
-    }),
-    prisma.likedItem.count({ where }),
-    prisma.customFieldDefinition.findMany({ orderBy: [{ position: "asc" }, { createdAt: "asc" }] }),
-    prisma.likedItem.groupBy({ by: ["category"], _count: { _all: true } }),
-    prisma.likedItem.count({ where: { enrichDiscarded: true } }),
-    prisma.likedItem.groupBy({
-      by: ["publishStatus"],
-      where: { enrichDiscarded: discardedView },
-      _count: { _all: true },
-    }),
-  ]);
+  const [items, total, definitions, grouped, discardedCount, statusCounts] = await withOwner(
+    userId,
+    async (tx) => {
+      return Promise.all([
+        tx.likedItem.findMany({
+          where,
+          orderBy: [{ likedAt: "desc" }, { tweetId: "desc" }],
+          take: PAGE_SIZE,
+          skip: offset,
+          include: { customFields: true },
+        }),
+        tx.likedItem.count({ where }),
+        tx.customFieldDefinition.findMany({ orderBy: [{ position: "asc" }, { createdAt: "asc" }] }),
+        tx.likedItem.groupBy({ by: ["category"], _count: { _all: true } }),
+        tx.likedItem.count({ where: { enrichDiscarded: true } }),
+        tx.likedItem.groupBy({
+          by: ["publishStatus"],
+          where: { enrichDiscarded: discardedView },
+          _count: { _all: true },
+        }),
+      ]);
+    },
+  );
 
   const countByStatus = Object.fromEntries(statusCounts.map((row) => [row.publishStatus, row._count._all]));
 

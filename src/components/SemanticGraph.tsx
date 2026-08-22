@@ -196,13 +196,29 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
   }, [payload, hiddenFamilies, hiddenClusters, colorMode, showFossils]);
 
   // Si el nodo seleccionado desaparece del lienzo (filtro), el panel se cierra.
+  // El setState en el efecto es necesario para sincronizar el panel cerrado con el filtro aplicado.
+  // @see https://react.dev/learn/you-might-not-need-an-effect
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (selectedId) {
-      const node = nodeById.get(selectedId);
-      if (!node || !isVisible(node)) setSelectedId(null);
+    if (!selectedId) return;
+
+    const node = nodeById.get(selectedId);
+    if (!node) {
+      setSelectedId(null);
+      return;
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hiddenFamilies, hiddenClusters, colorMode, showFossils]);
+
+    // Verificar si el nodo sigue visible con los filtros actuales
+    const isStillVisible =
+      (showFossils || vitalityOf(node) >= FOSSIL_THRESHOLD) &&
+      (colorMode !== "tema" || !hiddenClusters.has(node.clusterId ?? NO_CLUSTER_KEY)) &&
+      (colorMode === "tema" || !hiddenFamilies.has(familyOf(node.category)));
+
+    if (!isStillVisible) {
+      setSelectedId(null);
+    }
+  }, [selectedId, nodeById, colorMode, hiddenClusters, hiddenFamilies, showFossils]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   function toggleFamily(family: string) {
     setHiddenFamilies((prev) => {

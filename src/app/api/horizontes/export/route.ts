@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import { requireSessionApi } from "@/lib/require-admin";
+import { requireUserApi } from "@/lib/require-user";
+import { withOwner, type TenantTx } from "@/lib/tenant-db";
 
 const KINDS = ["temas", "senales", "historial"] as const;
 type Kind = (typeof KINDS)[number];
@@ -10,15 +10,18 @@ type Kind = (typeof KINDS)[number];
 // fila por señal con su tema, horizonte y vitalidad) e historial (una fila por
 // tema y snapshot: la serie temporal).
 export async function GET(request: NextRequest) {
-  const denied = await requireSessionApi();
-  if (denied) return denied;
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
 
   const kind = request.nextUrl.searchParams.get("kind") as Kind | null;
   if (!kind || !KINDS.includes(kind)) {
     return NextResponse.json({ error: `kind debe ser uno de ${KINDS.join(", ")}` }, { status: 400 });
   }
 
-  const rows = await (kind === "temas" ? temas() : kind === "senales" ? senales() : historial());
+  const rows = await withOwner(user.userId, async (tx) => {
+    return kind === "temas" ? temas(tx) : kind === "senales" ? senales(tx) : historial(tx);
+  });
+
   const stamp = new Date().toISOString().slice(0, 10);
   return new NextResponse(toCsv(rows), {
     headers: {
@@ -29,8 +32,8 @@ export async function GET(request: NextRequest) {
   });
 }
 
-async function temas() {
-  const clusters = await prisma.semanticCluster.findMany({
+async function temas(tx: TenantTx) {
+  const clusters = await tx.semanticCluster.findMany({
     orderBy: [{ status: "asc" }, { vitality: "desc" }],
   });
   return clusters.map((c) => ({
@@ -56,8 +59,8 @@ async function temas() {
   }));
 }
 
-async function senales() {
-  const items = await prisma.likedItem.findMany({
+async function senales(tx: TenantTx) {
+  const items = await tx.likedItem.findMany({
     where: { publishStatus: "published", embeddedAt: { not: null } },
     orderBy: [{ clusterId: "asc" }, { vitality: "desc" }],
     select: {
@@ -87,8 +90,8 @@ async function senales() {
   }));
 }
 
-async function historial() {
-  const rows = await prisma.graphSnapshotCluster.findMany({
+async function historial(tx: TenantTx) {
+  const rows = await tx.graphSnapshotCluster.findMany({
     orderBy: [{ snapshot: { takenAt: "asc" } }, { vitality: "desc" }],
     select: {
       clusterId: true,
