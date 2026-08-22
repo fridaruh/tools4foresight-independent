@@ -40,6 +40,7 @@ const DEFAULT_BUDGET_MS: Record<JobName, number> = {
   analyze: 240_000,
   embed: 240_000,
   graph: 240_000,
+  tags: 240_000,
 };
 
 export function defaultBudgetMs(name: JobName): number {
