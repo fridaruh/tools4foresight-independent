@@ -72,6 +72,8 @@ export default async function CategoriasPage() {
         )}
       </header>
 
+      <SourcesBoard summary={sources} />
+
       <CategoryEditor
         categories={categoryDtos}
         distribution={distribution}
@@ -79,7 +81,6 @@ export default async function CategoriasPage() {
         uncategorized={uncategorized}
       />
 
-      <SourcesBoard summary={sources} />
 
       {lowConfidence.length > 0 && (
         <section className="flex flex-col gap-3">
