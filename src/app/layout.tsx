@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import { IBM_Plex_Mono, Inter, Inter_Tight } from "next/font/google";
 import "./globals.css";
 import { TopNav } from "@/components/TopNav";
@@ -56,6 +57,12 @@ export default async function RootLayout({
       className={`${inter.variable} ${interTight.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-canvas text-ink">
+        <Script
+          src="https://datafa.st/js/script.js"
+          data-website-id="dfid_rzE4VOYg4sdJXuBPrTH6Q"
+          data-domain="tools4foresight.com"
+          strategy="afterInteractive"
+        />
         <TopNav
           role={role}
           user={sessionUser ? { name: sessionUser.name, email: sessionUser.email } : null}
