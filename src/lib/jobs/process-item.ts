@@ -1,52 +1,77 @@
-import { prisma } from "@/lib/prisma";
+import { withOwner, type TenantTx } from "@/lib/tenant-db";
 import { fetchContentMetadata } from "@/lib/content-fetch";
 import { categorizeBatch } from "@/lib/categorize";
 import { pestelClassifyBatch } from "@/lib/pestel-classify";
 import { generateImpact, generateTldr, generateWhyMatters, type AnalysisInput } from "@/lib/analyze";
 import { generateForesight } from "@/lib/foresight";
+import { getAnalysisSystemPrompts } from "@/lib/analysis-prompts";
 import { toBoardItem } from "@/lib/board-item";
 
 /**
- * Corre la cadena completa sobre UN item: fetch de contenido -> categorizacion ->
- * impacto -> "por que importa".
+ * Corre la cadena completa sobre UN item de UN tenant: fetch de contenido →
+ * categorización → PESTEL → TL;DR → impacto → "por qué importa" → foresight.
  *
- * Es la version sincrona de lo que los jobs hacen por lotes, y existe para el enlace
- * agregado a mano: quien acaba de pegar una URL espera ver la fila llena, no esperar
- * al cron. Cada etapa es independiente — si la categorizacion falla (Ollama caido, sin
- * API key), el item se queda con category = null y los jobs normales lo levantan
- * despues, igual que a cualquier otro.
+ * Es la versión síncrona de lo que los jobs hacen por lotes, y existe para el
+ * enlace agregado a mano: quien acaba de pegar una URL espera ver la fila llena,
+ * no esperar al cron. Cada etapa es independiente — si la categorización falla
+ * (Ollama caído, sin API key), el item se queda con `category = null` y los jobs
+ * normales lo levantan después, igual que a cualquier otro.
  *
- * Respeta las mismas reglas que los jobs: no pisa nada marcado como 'manual' y no
- * regenera lo que ya tiene valor.
+ * Respeta las mismas reglas que los jobs: no pisa nada marcado como 'manual' y
+ * no regenera lo que ya tiene valor.
+ *
+ * Sobre las transacciones: NO se envuelve todo en un solo `withOwner`. Entre
+ * etapa y etapa hay llamadas de red de hasta 90 s cada una; una transacción
+ * abierta ese tiempo contra el pooler de Neon se come una conexión del pool por
+ * item (PLAN §7.4). Cada escritura abre la suya, corta, y el `ownerId` viaja en
+ * el `where` de todas.
  */
-export async function processSingleItem(id: string) {
-  const item = await prisma.likedItem.findUnique({
-    where: { id },
-    select: {
-      id: true,
-      tweetId: true,
-      authorHandle: true,
-      tweetText: true,
-      contentUrl: true,
-      contentTitle: true,
-      contentDescription: true,
-      fetchStatus: true,
-      category: true,
-      categorySource: true,
-      pestel: true,
-      pestelSource: true,
-      tldr: true,
-      tldrSource: true,
-      impact: true,
-      impactSource: true,
-      whyMatters: true,
-      whyMattersSource: true,
-      foresight: true,
-      foresightSource: true,
-    },
-  });
+export async function processSingleItem(ownerId: string, id: string) {
+  const item = await withOwner(ownerId, (tx) =>
+    tx.likedItem.findFirst({
+      where: { id, ownerId },
+      select: {
+        id: true,
+        tweetId: true,
+        authorHandle: true,
+        tweetText: true,
+        contentUrl: true,
+        contentTitle: true,
+        contentDescription: true,
+        fetchStatus: true,
+        category: true,
+        categorySource: true,
+        pestel: true,
+        pestelSource: true,
+        tldr: true,
+        tldrSource: true,
+        impact: true,
+        impactSource: true,
+        whyMatters: true,
+        whyMattersSource: true,
+        foresight: true,
+        foresightSource: true,
+      },
+    }),
+  );
 
+  // No encontrado y "de otro tenant" son la misma respuesta a propósito: un 404
+  // distinto de un 403 le diría al curioso que el item existe.
   if (!item) return { ok: false as const, error: "No encontrado" };
+
+  // El catálogo de categorías y los system prompts son DEL TENANT y se leen una
+  // sola vez, igual que en los jobs por lotes: son la misma consulta para las
+  // cuatro llamadas al modelo que vienen abajo.
+  const { categories, prompts } = await withOwner(ownerId, async (tx) => ({
+    categories: await tx.category.findMany({
+      where: { ownerId },
+      orderBy: { position: "asc" },
+    }),
+    prompts: await getAnalysisSystemPrompts(tx, ownerId),
+  }));
+
+  /** Azúcar: cada escritura es su propia transacción de tenant, corta. */
+  const write = <T>(fn: (tx: TenantTx) => Promise<T>) => withOwner(ownerId, fn);
 
   const errors: string[] = [];
   let contentTitle = item.contentTitle;
@@ -58,22 +83,26 @@ export async function processSingleItem(id: string) {
       const content = await fetchContentMetadata(item.contentUrl);
       contentTitle = content.title;
       contentDescription = content.description;
-      await prisma.likedItem.update({
-        where: { id },
-        data: {
-          contentTitle: content.title,
-          contentDescription: content.description,
-          contentImageUrl: content.imageUrl,
-          contentPublishedAt: content.publishedAt,
-          fetchedAt: new Date(),
-          fetchStatus: "success",
-        },
-      });
+      await write((tx) =>
+        tx.likedItem.updateMany({
+          where: { id, ownerId },
+          data: {
+            contentTitle: content.title,
+            contentDescription: content.description,
+            contentImageUrl: content.imageUrl,
+            contentPublishedAt: content.publishedAt,
+            fetchedAt: new Date(),
+            fetchStatus: "success",
+          },
+        }),
+      );
     } catch (error) {
-      await prisma.likedItem.update({
-        where: { id },
-        data: { fetchedAt: new Date(), fetchStatus: "failed" },
-      });
+      await write((tx) =>
+        tx.likedItem.updateMany({
+          where: { id, ownerId },
+          data: { fetchedAt: new Date(), fetchStatus: "failed" },
+        }),
+      );
       // No se corta: el titulo del enlace ayuda, pero la URL sola tambien dice algo
       // (el dominio, el slug) y el modelo puede clasificar con eso.
       errors.push(`No se pudo leer el contenido del enlace: ${message(error)}`);
@@ -84,26 +113,31 @@ export async function processSingleItem(id: string) {
   //    el job por lotes, sin duplicar el manejo de respuestas raras del modelo.
   if (item.category === null && item.categorySource !== "manual") {
     try {
-      const [result] = await categorizeBatch([
-        {
-          tweetId: item.tweetId,
-          authorHandle: item.authorHandle,
-          tweetText: item.tweetText,
-          contentTitle,
-          contentDescription,
-        },
-      ]);
-      if (result) {
-        await prisma.likedItem.updateMany({
-          where: { id, category: null, categorySource: { not: "manual" } },
-          data: {
-            category: result.category,
-            categorySource: "auto",
-            categoryConfidence: result.confidence,
-            categoryReasoning: result.reasoning,
-            categorizedAt: new Date(),
+      const [result] = await categorizeBatch(
+        [
+          {
+            tweetId: item.tweetId,
+            authorHandle: item.authorHandle,
+            tweetText: item.tweetText,
+            contentTitle,
+            contentDescription,
           },
-        });
+        ],
+        categories,
+      );
+      if (result) {
+        await write((tx) =>
+          tx.likedItem.updateMany({
+            where: { id, ownerId, category: null, categorySource: { not: "manual" } },
+            data: {
+              category: result.category,
+              categorySource: "auto",
+              categoryConfidence: result.confidence,
+              categoryReasoning: result.reasoning,
+              categorizedAt: new Date(),
+            },
+          }),
+        );
       }
     } catch (error) {
       errors.push(`No se pudo categorizar: ${message(error)}`);
@@ -119,18 +153,20 @@ export async function processSingleItem(id: string) {
         { tweetId: item.tweetId, tweetText: item.tweetText, contentTitle, contentDescription },
       ]);
       if (result) {
-        await prisma.likedItem.updateMany({
-          where: { id, pestel: { equals: [] }, pestelSource: { not: "manual" } },
-          data: { pestel: result.pestel, pestelSource: "auto" },
-        });
+        await write((tx) =>
+          tx.likedItem.updateMany({
+            where: { id, ownerId, pestel: { equals: [] }, pestelSource: { not: "manual" } },
+            data: { pestel: result.pestel, pestelSource: "auto" },
+          }),
+        );
       }
     } catch (error) {
       errors.push(`No se pudo clasificar PESTEL: ${message(error)}`);
     }
   }
 
-  // 3. Impacto y "por que importa", en ese orden: el segundo usa el primero como
-  //    contexto (ver lib/analyze.ts).
+  // 3. TL;DR, impacto y "por que importa", en ese orden: el tercero usa el segundo
+  //    como contexto (ver lib/analyze.ts).
   const source: AnalysisInput = {
     tweetText: item.tweetText,
     contentTitle,
@@ -141,52 +177,65 @@ export async function processSingleItem(id: string) {
     let tldr = item.tldr;
 
     if (tldr === null && item.tldrSource !== "manual") {
-      tldr = await generateTldr(source);
-      await prisma.likedItem.updateMany({
-        where: { id, tldr: null, tldrSource: { not: "manual" } },
-        data: { tldr, tldrSource: "auto", tldrGeneratedAt: new Date() },
-      });
+      tldr = await generateTldr(source, prompts.tldr);
+      await write((tx) =>
+        tx.likedItem.updateMany({
+          where: { id, ownerId, tldr: null, tldrSource: { not: "manual" } },
+          data: { tldr, tldrSource: "auto", tldrGeneratedAt: new Date() },
+        }),
+      );
     }
 
     let impact = item.impact;
 
     if (impact === null && item.impactSource !== "manual") {
-      impact = await generateImpact(source);
-      await prisma.likedItem.updateMany({
-        where: { id, impact: null, impactSource: { not: "manual" } },
-        data: { impact, impactSource: "auto", impactGeneratedAt: new Date() },
-      });
+      impact = await generateImpact(source, prompts.impact);
+      await write((tx) =>
+        tx.likedItem.updateMany({
+          where: { id, ownerId, impact: null, impactSource: { not: "manual" } },
+          data: { impact, impactSource: "auto", impactGeneratedAt: new Date() },
+        }),
+      );
     }
 
     let whyMatters = item.whyMatters;
 
     if (impact !== null && whyMatters === null && item.whyMattersSource !== "manual") {
-      whyMatters = await generateWhyMatters(source, impact);
-      await prisma.likedItem.updateMany({
-        where: { id, whyMatters: null, whyMattersSource: { not: "manual" } },
-        data: { whyMatters, whyMattersSource: "auto", whyMattersGeneratedAt: new Date() },
-      });
+      whyMatters = await generateWhyMatters(source, impact, prompts.whyMatters);
+      await write((tx) =>
+        tx.likedItem.updateMany({
+          where: { id, ownerId, whyMatters: null, whyMattersSource: { not: "manual" } },
+          data: { whyMatters, whyMattersSource: "auto", whyMattersGeneratedAt: new Date() },
+        }),
+      );
     }
 
     // 4. Foresight, al final: parte del TL;DR y del "por que importa". Corre en
-    //    Claude (ver lib/foresight.ts), no en Ollama.
+    //    Claude con la API key DEL USUARIO (BYOK, PLAN 3.7); si no tiene key
+    //    verificada, generateForesight se encarga y aqui se registra el motivo.
     if (
       tldr !== null &&
       whyMatters !== null &&
       item.foresight === null &&
       item.foresightSource !== "manual"
     ) {
-      const foresight = await generateForesight({ tldr, whyMatters });
-      await prisma.likedItem.updateMany({
-        where: { id, foresight: null, foresightSource: { not: "manual" } },
-        data: { foresight, foresightSource: "auto", foresightGeneratedAt: new Date() },
-      });
+      const foresight = await generateForesight(ownerId, { tldr, whyMatters }, prompts.foresight);
+      if (foresight) {
+        await write((tx) =>
+          tx.likedItem.updateMany({
+            where: { id, ownerId, foresight: null, foresightSource: { not: "manual" } },
+            data: { foresight, foresightSource: "auto", foresightGeneratedAt: new Date() },
+          }),
+        );
+      }
     }
   } catch (error) {
     errors.push(`No se pudo generar el análisis: ${message(error)}`);
   }
 
-  const updated = await prisma.likedItem.findUniqueOrThrow({ where: { id } });
+  const updated = await withOwner(ownerId, (tx) =>
+    tx.likedItem.findFirstOrThrow({ where: { id, ownerId } }),
+  );
 
   return {
     // La corrida "sirvio" mientras el item exista. Los errores de cada etapa se

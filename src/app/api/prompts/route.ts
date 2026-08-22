@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserApi } from "@/lib/require-user";
+import { withOwner } from "@/lib/tenant-db";
 import { getPromptOverrides, isPromptKey, PROMPT_DEFAULTS } from "@/lib/analysis-prompts";
 
 // System prompts del análisis, editables desde la pantalla de Sistema. La tabla solo
@@ -10,7 +11,7 @@ export async function GET() {
   const user = await requireUserApi();
   if (user instanceof NextResponse) return user;
 
-  const overrides = await getPromptOverrides();
+  const overrides = await withOwner(user.userId, (tx) => getPromptOverrides(tx, user.userId));
   return NextResponse.json({
     prompts: {
       tldr: { value: overrides.tldr, default: PROMPT_DEFAULTS.tldr },

@@ -4,7 +4,8 @@ import { RunPipelineButton } from "@/components/RunPipelineButton";
 import { RetryFetchButton } from "@/components/RetryFetchButton";
 import { AnalysisPromptsEditor } from "@/components/AnalysisPromptsEditor";
 import { getPromptOverrides, PROMPT_DEFAULTS } from "@/lib/analysis-prompts";
-import { requireAdminPage } from "@/lib/require-admin";
+import { requireUserPage } from "@/lib/require-user";
+import { withOwner } from "@/lib/tenant-db";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default async function ConexionPage() {
-  await requireAdminPage();
+  const user = await requireUserPage();
 
   const [token, cursor, byFetchStatus, failed, total, promptOverrides] = await Promise.all([
     prisma.xAuthToken.findFirst({ select: { xUserId: true, expiresAt: true, updatedAt: true } }),
@@ -29,7 +30,7 @@ export default async function ConexionPage() {
       select: { id: true, tweetText: true, contentUrl: true, authorHandle: true },
     }),
     prisma.likedItem.count(),
-    getPromptOverrides(),
+    withOwner(user.userId, (tx) => getPromptOverrides(tx, user.userId)),
   ]);
 
   const counts = Object.fromEntries(byFetchStatus.map((row) => [row.fetchStatus, row._count._all]));

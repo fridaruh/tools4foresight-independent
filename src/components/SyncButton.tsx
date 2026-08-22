@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatSyncSummary, type SyncStages } from "@/lib/sync-summary";
 
 export function SyncButton() {
   const router = useRouter();
@@ -14,10 +13,11 @@ export function SyncButton() {
     setResult(null);
     try {
       const res = await fetch("/api/sync", { method: "POST" });
-      // `/api/sync` corre las cuatro etapas, no solo la ingesta: el mensaje reporta
-      // todas para que no parezca que el boton solo trae likes.
-      const data = (await res.json()) as SyncStages;
-      setResult(formatSyncSummary(data));
+      // `/api/sync` corre las cuatro etapas, no solo la ingesta, y ya devuelve el
+      // resumen armado (una linea con lo que avanzo cada una). El 429 del cooldown
+      // de 30 min llega por el mismo camino, en `error`.
+      const data = (await res.json()) as { summary?: string; error?: string };
+      setResult(data.summary ?? data.error ?? "Ya estabas al día");
       router.refresh();
     } catch {
       setResult("No se pudo conectar con el servidor");

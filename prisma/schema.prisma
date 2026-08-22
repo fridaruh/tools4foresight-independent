@@ -143,6 +143,12 @@ model UserQuota {
   // Marca de "el grafo de este tenant quedó sucio" (publicó/despublicó algo).
   // El cron de grafo solo procesa tenants con graphDirtyAt != null (PLAN 3.10).
   graphDirtyAt       DateTime? @map("graph_dirty_at")
+  // Cooldowns de las acciones manuales del usuario (PLAN 3.10 / 3.12). No son
+  // cuotas: son antirrebote para que un click repetido no dispare N pipelines.
+  //   lastManualSyncAt    -> POST /api/sync            (30 min)
+  //   lastGraphRefreshAt  -> POST /api/jobs/graph/now  (10 min)
+  lastManualSyncAt   DateTime? @map("last_manual_sync_at")
+  lastGraphRefreshAt DateTime? @map("last_graph_refresh_at")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

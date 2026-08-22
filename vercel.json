@@ -1,10 +1,10 @@
 {
   "crons": [
-    { "path": "/api/jobs/ingest-likes", "schedule": "0 6 * * *" },
-    { "path": "/api/jobs/fetch-content", "schedule": "30 6 * * *" },
+    { "path": "/api/jobs/ingest", "schedule": "0 6 * * *" },
+    { "path": "/api/jobs/fetch", "schedule": "30 6 * * *" },
     { "path": "/api/jobs/categorize", "schedule": "0 7 * * *" },
     { "path": "/api/jobs/analyze", "schedule": "30 7 * * *" },
-    { "path": "/api/jobs/graph", "schedule": "0 8 * * *" },
-    { "path": "/api/jobs/onboarding-emails", "schedule": "0 15 * * *" }
+    { "path": "/api/jobs/embed", "schedule": "0 8 * * *" },
+    { "path": "/api/jobs/graph", "schedule": "30 8 * * *" }
   ]
 }

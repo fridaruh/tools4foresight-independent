@@ -1,12 +1,8 @@
-import { NextRequest, NextResponse, after } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextRequest, NextResponse } from "next/server";
 import { normalizePestel } from "@/config/pestel";
 import { requireUserApi } from "@/lib/require-user";
 import { isPublishable, isPublishStatus } from "@/lib/publish";
-import { refreshGraph } from "@/lib/jobs/graph";
-
-// Margen para el recalculo del grafo que corre despues de responder (ver abajo).
-export const maxDuration = 300;
+import { withOwner } from "@/lib/tenant-db";
 
 type Body = {
   category?: string | null;
@@ -23,10 +19,24 @@ type Body = {
   customFields?: Record<string, string>;
 };
 
+/**
+ * Editar un item propio.
+ *
+ * Todo pasa por `withOwner(userId)` y todo `where` lleva `ownerId`: un id de
+ * otro tenant no se edita, se responde 404 (no 403 — un 403 confirmaría que el
+ * item existe).
+ *
+ * Publicar/despublicar ya NO recalcula el grafo en un `after()` (PLAN §3.10):
+ * eran 2 minutos de función por cada click y N clicks seguidos disparaban N
+ * recálculos encimados del mismo tenant. Ahora solo se marca `graphDirtyAt` y
+ * quien recalcula es el cron de grafo —que solo despacha tenants marcados— o el
+ * botón "recalcular ahora" (`POST /api/jobs/graph/now`).
+ */
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireUserApi();
   if (user instanceof NextResponse) return user;
 
+  const ownerId = user.userId;
   const { id } = await params;
   const body = (await request.json()) as Body;
 
@@ -35,7 +45,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if ("category" in body) {
     data.category = body.category;
     // Una edicion manual marca la fuente para que las corridas automaticas
-    // futuras no la pisen (PLAN 3.3 / fase 4).
+    // futuras no la pisen.
     data.categorySource = "manual";
     data.categoryConfidence = null;
     data.categoryReasoning = null;
@@ -65,98 +75,127 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // que se vea en el catalogo.
   if (typeof body.enrichDiscarded === "boolean") data.enrichDiscarded = body.enrichDiscarded;
 
-  if ("publishStatus" in body) {
-    if (!isPublishStatus(body.publishStatus)) {
-      return NextResponse.json({ error: "publishStatus inválido" }, { status: 400 });
-    }
+  const customEntries = Object.entries(body.customFields ?? {});
+  const changesPublishStatus = "publishStatus" in body;
 
-    if (body.publishStatus === "published") {
-      // La regla se evalua contra el estado que va a quedar: si esta misma llamada
-      // trae category/impact/whyMatters, cuentan; si no, se usa lo que ya hay en la DB.
-      const current = await prisma.likedItem.findFirst({
-        where: { id, ownerId: user.userId },
-        select: { category: true, impact: true, whyMatters: true },
-      });
-      if (!current) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
-
-      const effective = {
-        category: "category" in body ? body.category ?? null : current.category,
-        impact: "impact" in body ? body.impact ?? null : current.impact,
-        whyMatters: "whyMatters" in body ? body.whyMatters ?? null : current.whyMatters,
-      };
-      if (!isPublishable(effective)) {
-        return NextResponse.json(
-          { error: "Falta categoría, impacto o \"por qué importa\" para poder publicar." },
-          { status: 400 },
-        );
-      }
-    }
-
-    data.publishStatus = body.publishStatus;
-    data.publishedAt = body.publishStatus === "published" ? new Date() : null;
+  if (changesPublishStatus && !isPublishStatus(body.publishStatus)) {
+    return NextResponse.json({ error: "publishStatus inválido" }, { status: 400 });
   }
 
-  const customEntries = Object.entries(body.customFields ?? {});
-
-  if (Object.keys(data).length === 0 && customEntries.length === 0) {
+  if (Object.keys(data).length === 0 && customEntries.length === 0 && !changesPublishStatus) {
     return NextResponse.json({ error: "Nada que actualizar" }, { status: 400 });
   }
 
-  // El boton "Guardar" de la pantalla 2 manda toda la fila de una vez, asi que
-  // los campos base y los custom se escriben en una sola transaccion: o queda
-  // toda la fila o no queda nada.
-  const writes = [];
-  if (Object.keys(data).length > 0) {
-    // where con ownerId: si el item es de otro tenant el update revienta con
-    // P2025 en vez de tocar la fila (y RLS lo cortaria igual).
-    writes.push(prisma.likedItem.update({ where: { id, ownerId: user.userId }, data }));
-  }
-  for (const [fieldKey, fieldValue] of customEntries) {
-    writes.push(
-      prisma.likedItemCustomField.upsert({
+  const result = await withOwner(ownerId, async (tx) => {
+    const current = await tx.likedItem.findFirst({
+      where: { id, ownerId },
+      select: { category: true, impact: true, whyMatters: true },
+    });
+    if (!current) return { status: 404 as const, error: "No encontrado" };
+
+    if (changesPublishStatus) {
+      if (body.publishStatus === "published") {
+        // La regla se evalua contra el estado que va a quedar: si esta misma
+        // llamada trae category/impact/whyMatters, cuentan; si no, se usa lo que
+        // ya hay en la DB.
+        const effective = {
+          category: "category" in body ? body.category ?? null : current.category,
+          impact: "impact" in body ? body.impact ?? null : current.impact,
+          whyMatters: "whyMatters" in body ? body.whyMatters ?? null : current.whyMatters,
+        };
+        if (!isPublishable(effective)) {
+          return {
+            status: 400 as const,
+            error: 'Falta categoría, impacto o "por qué importa" para poder publicar.',
+          };
+        }
+      }
+
+      data.publishStatus = body.publishStatus;
+      data.publishedAt = body.publishStatus === "published" ? new Date() : null;
+    }
+
+    // El boton "Guardar" de la pantalla 2 manda toda la fila de una vez, asi que
+    // los campos base y los custom se escriben en la misma transaccion: o queda
+    // toda la fila o no queda nada.
+    if (Object.keys(data).length > 0) {
+      await tx.likedItem.updateMany({ where: { id, ownerId }, data });
+    }
+    for (const [fieldKey, fieldValue] of customEntries) {
+      await tx.likedItemCustomField.upsert({
         where: { likedItemId_fieldKey: { likedItemId: id, fieldKey } },
         update: { fieldValue },
-        create: { ownerId: user.userId, likedItemId: id, fieldKey, fieldValue },
-      }),
-    );
-  }
+        create: { ownerId, likedItemId: id, fieldKey, fieldValue },
+      });
+    }
 
-  await prisma.$transaction(writes);
+    // Debounce del grafo: publicar o despublicar solo ensucia la marca.
+    if (changesPublishStatus) {
+      await tx.userQuota.updateMany({
+        where: { userId: ownerId },
+        data: { graphDirtyAt: new Date() },
+      });
+    }
 
-  // Publicar o despublicar cambia el grafo (solo vive sobre lo publicado). El
-  // recalculo corre DESPUES de responder para no hacer esperar a Frida; si la
-  // señal aun no tiene embedding entra al grafo cuando corra el embed local, pero
-  // la vitalidad y los temas del resto ya quedan al dia.
-  if ("publishStatus" in data) {
-    after(async () => {
-      try {
-        await refreshGraph(user.userId, "publish");
-      } catch (error) {
-        console.error("[grafo] recalculo tras publicar fallo:", error);
-      }
+    const item = await tx.likedItem.findFirst({
+      where: { id, ownerId },
+      include: { customFields: true },
     });
-  }
 
-  const item = await prisma.likedItem.findFirst({
-    where: { id, ownerId: user.userId },
-    include: { customFields: true },
+    return { status: 200 as const, item };
   });
 
-  return NextResponse.json({ item });
+  if (result.status !== 200) {
+    return NextResponse.json({ error: result.error }, { status: result.status });
+  }
+  return NextResponse.json({ item: result.item, graphDirty: changesPublishStatus });
 }
 
-// El GET tambien lleva guard: sin el, cualquiera con el id de un item lo leia
-// completo (PLAN 3.13).
+/**
+ * Leer un item propio. Lleva guard igual que el PATCH: sin el, cualquiera con
+ * el id de un item lo leia completo (PLAN §3.13).
+ */
 export async function GET(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const user = await requireUserApi();
   if (user instanceof NextResponse) return user;
 
   const { id } = await params;
-  const item = await prisma.likedItem.findFirst({
-    where: { id, ownerId: user.userId },
-    include: { customFields: true },
-  });
+  const item = await withOwner(user.userId, (tx) =>
+    tx.likedItem.findFirst({
+      where: { id, ownerId: user.userId },
+      include: { customFields: true },
+    }),
+  );
 
   if (!item) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   return NextResponse.json({ item });
+}
+
+/**
+ * Borrar un item propio. Las filas colgadas (custom fields, aristas del grafo,
+ * membresías de snapshot) se van por `onDelete: Cascade` del schema.
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await requireUserApi();
+  if (user instanceof NextResponse) return user;
+
+  const ownerId = user.userId;
+  const { id } = await params;
+
+  const deleted = await withOwner(ownerId, async (tx) => {
+    const removed = await tx.likedItem.deleteMany({ where: { id, ownerId } });
+    if (removed.count === 0) return 0;
+    // Borrar una señal publicada cambia el grafo tanto como despublicarla.
+    await tx.userQuota.updateMany({
+      where: { userId: ownerId },
+      data: { graphDirtyAt: new Date() },
+    });
+    return removed.count;
+  });
+
+  if (deleted === 0) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
+  return NextResponse.json({ ok: true });
 }

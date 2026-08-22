@@ -145,7 +145,7 @@ export default async function EnrichPage({
             )}
           </p>
         </div>
-        {!discardedView && <RunJobButton path="/api/jobs/analyze" label="Generar análisis" />}
+        {!discardedView && <RunJobButton path="/api/jobs/analyze/run" label="Generar análisis" />}
       </header>
 
       <EnrichFiltersBar filters={filters} resultCount={total} />

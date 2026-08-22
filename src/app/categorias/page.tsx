@@ -66,7 +66,7 @@ export default async function CategoriasPage() {
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <h2 className="section-heading text-ink">Distribución</h2>
-          {uncategorized > 0 && <RunJobButton path="/api/jobs/categorize" label="Categorizar pendientes" />}
+          {uncategorized > 0 && <RunJobButton path="/api/jobs/categorize/run" label="Categorizar pendientes" />}
         </div>
 
         {/* En movil la tabla completa no cabe y scrollear la cortaba en un numero a

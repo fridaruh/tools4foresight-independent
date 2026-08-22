@@ -228,7 +228,7 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
         <p className="section-title text-ink">El grafo está vacío</p>
         <p className="max-w-md text-sm text-ink-subtle">
           {payload.unembedded > 0
-            ? `Hay ${payload.unembedded} señales publicadas sin embeber. Corre el job de embeddings (con tu Ollama local arriba): POST /api/jobs/embed.`
+            ? `Hay ${payload.unembedded} señales publicadas sin embeber. Corre el job de embeddings (con tu Ollama local arriba): POST /api/jobs/embed/run.`
             : "No hay señales publicadas todavía: el grafo se construye solo sobre lo publicado."}
         </p>
       </div>

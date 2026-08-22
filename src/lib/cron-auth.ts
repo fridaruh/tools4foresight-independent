@@ -25,6 +25,20 @@ export async function unauthorizedJobResponse(request: Request): Promise<NextRes
   return NextResponse.json({ ok: false, error: "No autorizado" }, { status: 401 });
 }
 
+/**
+ * ¿Es la request del cron de Vercel (o de alguien con el secreto)?
+ *
+ * Es la puerta del DISPATCHER (`POST /api/jobs/<job>`), que no corre para un
+ * tenant sino para todos: no acepta sesión de usuario, porque un usuario no
+ * tiene por qué poder disparar el pipeline de los demás. El botón manual de la
+ * UI pega a `…/run`, que sí acepta sesión y queda acotado a su propio owner.
+ */
+export function isCronRequest(request: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  return request.headers.get("authorization") === `Bearer ${secret}`;
+}
+
 export type JobRequest =
   | { ok: true; ownerId: string; isCron: boolean }
   | { ok: false; response: NextResponse };
@@ -38,9 +52,9 @@ export type JobRequest =
  *   - con sesión de usuario (el botón de /conexion): el tenant ES el de la sesión;
  *     un `?owner=` de otro usuario se rechaza con 403.
  *
- * TODO(fase3): hoy el cron de Vercel pega a estos endpoints sin `?owner=` y se
- * lleva un 400. El dispatcher que enumera tenants y hace fan-out (PLAN 3.11) es
- * lo que va a llenar ese parámetro; hasta entonces los jobs solo corren a mano.
+ * Quien llena el `?owner=` es el dispatcher (`/api/jobs/<job>`, PLAN 3.11): el
+ * cron de Vercel le pega a él, no a `…/run`, y él hace fan-out con este mismo
+ * header más el owner de cada tenant.
  */
 export async function resolveJobRequest(request: Request): Promise<JobRequest> {
   const secret = process.env.CRON_SECRET;

@@ -10,11 +10,11 @@ import { formatSyncSummary, type SyncStages } from "@/lib/sync-summary";
  * se categoriza y al final se escribe el analisis.
  */
 const STEPS = [
-  { key: "ingestion", path: "/api/jobs/ingest-likes", label: "Trayendo likes nuevos…" },
-  { key: "content", path: "/api/jobs/fetch-content", label: "Leyendo links pendientes…" },
-  { key: "categorization", path: "/api/jobs/categorize", label: "Categorizando…" },
-  { key: "analysis", path: "/api/jobs/analyze", label: "Generando análisis…" },
-  { key: "graph", path: "/api/jobs/graph", label: "Actualizando el grafo…" },
+  { key: "ingestion", path: "/api/jobs/ingest/run", label: "Trayendo likes nuevos…" },
+  { key: "content", path: "/api/jobs/fetch/run", label: "Leyendo links pendientes…" },
+  { key: "categorization", path: "/api/jobs/categorize/run", label: "Categorizando…" },
+  { key: "analysis", path: "/api/jobs/analyze/run", label: "Generando análisis…" },
+  { key: "graph", path: "/api/jobs/graph/run", label: "Actualizando el grafo…" },
 ] as const;
 
 /**
