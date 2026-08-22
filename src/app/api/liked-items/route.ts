@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tenantClient } from "@/lib/tenant-db";
+import { withOwner } from "@/lib/tenant-db";
 import { buildWhere, filtersFromSearchParams } from "@/lib/liked-items-query";
 import { toBoardItem } from "@/lib/board-item";
 import { InvalidLinkError, manualItemInput, normalizeLinkUrl } from "@/lib/manual-link";
@@ -20,6 +20,7 @@ export async function GET(request: NextRequest) {
   // El alcance lo pone el ownerId. `scope=published` sigue existiendo como filtro
   // opcional de la UI, no como regla de seguridad.
   const where = buildWhere(filters);
+  where.ownerId = user.userId;
   if (searchParams.get("scope") === "published") {
     where.publishStatus = "published";
   }
@@ -27,16 +28,17 @@ export async function GET(request: NextRequest) {
   // Paginacion por offset y no por cursor: el orden es por `likedAt`, que tiene
   // empates (varios items historicos comparten fecha), y un cursor sobre un campo
   // no unico se salta filas.
-  const client = tenantClient(user.userId);
-  const [items, total] = await Promise.all([
-    client.likedItem.findMany({
-      where,
-      orderBy: [{ likedAt: "desc" }, { tweetId: "desc" }],
-      take: limit,
-      skip: offset,
-    }),
-    client.likedItem.count({ where }),
-  ]);
+  const [items, total] = await withOwner(user.userId, (tx) =>
+    Promise.all([
+      tx.likedItem.findMany({
+        where,
+        orderBy: [{ likedAt: "desc" }, { tweetId: "desc" }],
+        take: limit,
+        skip: offset,
+      }),
+      tx.likedItem.count({ where }),
+    ]),
+  );
 
   return NextResponse.json({
     // Misma forma que la primera pagina renderizada en el servidor (ver BoardItem):
@@ -71,22 +73,25 @@ export async function POST(request: NextRequest) {
   // Se busca por las dos columnas: un enlace que ya llego por un like de X vive en
   // `contentUrl`, y uno agregado a mano en las dos. Agregarlo otra vez duplicaria la
   // fila en el catalogo sin que nada mas lo impida (el unique es sobre `tweetId`).
-  const client = tenantClient(user.userId);
-  const existing = await client.likedItem.findFirst({
-    where: { OR: [{ contentUrl: url }, { tweetUrl: url }] },
-    include: { customFields: true },
+  const result = await withOwner(user.userId, async (tx) => {
+    const existing = await tx.likedItem.findFirst({
+      where: { ownerId: user.userId, OR: [{ contentUrl: url }, { tweetUrl: url }] },
+      include: { customFields: true },
+    });
+    if (existing) return { status: 409 as const, item: existing };
+
+    const item = await tx.likedItem.create({
+      data: manualItemInput(url, user.userId),
+      include: { customFields: true },
+    });
+    return { status: 201 as const, item };
   });
-  if (existing) {
+
+  if (result.status === 409) {
     return NextResponse.json(
-      { error: "Ese enlace ya está en el catálogo.", item: toBoardItem(existing) },
+      { error: "Ese enlace ya está en el catálogo.", item: toBoardItem(result.item) },
       { status: 409 },
     );
   }
-
-  const item = await client.likedItem.create({
-    data: manualItemInput(url, user.userId),
-    include: { customFields: true },
-  });
-
-  return NextResponse.json({ item: toBoardItem(item) }, { status: 201 });
+  return NextResponse.json({ item: toBoardItem(result.item) }, { status: 201 });
 }

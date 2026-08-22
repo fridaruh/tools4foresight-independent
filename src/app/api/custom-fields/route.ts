@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tenantClient } from "@/lib/tenant-db";
+import { withOwner } from "@/lib/tenant-db";
 import { requireUserApi } from "@/lib/require-user";
 
 export async function GET() {
   const user = await requireUserApi();
   if (user instanceof NextResponse) return user;
 
-  const client = tenantClient(user.userId);
-  const fields = await client.customFieldDefinition.findMany({
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-  });
+  const fields = await withOwner(user.userId, (tx) =>
+    tx.customFieldDefinition.findMany({
+      where: { ownerId: user.userId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+    }),
+  );
   return NextResponse.json({ fields });
 }
 
@@ -26,20 +28,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Falta el nombre de la columna" }, { status: 400 });
   }
 
-  const client = tenantClient(user.userId);
-  const existing = await client.customFieldDefinition.findFirst({
-    where: { fieldKey: key },
+  const result = await withOwner(user.userId, async (tx) => {
+    const existing = await tx.customFieldDefinition.findFirst({
+      where: { ownerId: user.userId, fieldKey: key },
+    });
+    if (existing) return { status: 409 as const };
+
+    const count = await tx.customFieldDefinition.count({ where: { ownerId: user.userId } });
+    const field = await tx.customFieldDefinition.create({
+      data: { fieldKey: key, position: count, ownerId: user.userId },
+    });
+    return { status: 201 as const, field };
   });
-  if (existing) {
+
+  if (result.status === 409) {
     return NextResponse.json({ error: "Ya existe una columna con ese nombre" }, { status: 409 });
   }
-
-  const count = await client.customFieldDefinition.count();
-  const field = await client.customFieldDefinition.create({
-    data: { fieldKey: key, position: count, ownerId: user.userId },
-  });
-
-  return NextResponse.json({ field }, { status: 201 });
+  return NextResponse.json({ field: result.field }, { status: 201 });
 }
 
 export async function DELETE(request: NextRequest) {
@@ -50,11 +55,12 @@ export async function DELETE(request: NextRequest) {
   if (!key) return NextResponse.json({ error: "Falta fieldKey" }, { status: 400 });
 
   // Borra la definicion y los valores que ya se hayan capturado en esa columna.
-  const client = tenantClient(user.userId);
-  await client.$transaction([
-    client.likedItemCustomField.deleteMany({ where: { fieldKey: key } }),
-    client.customFieldDefinition.deleteMany({ where: { fieldKey: key } }),
-  ]);
+  await withOwner(user.userId, (tx) =>
+    Promise.all([
+      tx.likedItemCustomField.deleteMany({ where: { ownerId: user.userId, fieldKey: key } }),
+      tx.customFieldDefinition.deleteMany({ where: { ownerId: user.userId, fieldKey: key } }),
+    ]),
+  );
 
   return NextResponse.json({ ok: true });
 }

@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { tenantClient } from "@/lib/tenant-db";
+import { withOwner } from "@/lib/tenant-db";
 import { manualItemInput } from "@/lib/manual-link";
 import { CsvTooLargeError, parseCsvLinks } from "@/lib/csv-links";
 import { requireUserApi } from "@/lib/require-user";
 
 const MAX_FILE_BYTES = 1_000_000;
+
+// Hasta 1000 filas: el parseo es rápido, pero el INSERT + el chequeo de
+// duplicados contra el catálogo entero puede tardar más que el default.
+export const maxDuration = 60;
 
 /**
  * Carga de enlaces en batch desde /conexion: mismo destino que
@@ -40,26 +44,30 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ created: 0, duplicates: 0, invalid: parsed.invalid });
   }
 
-  const client = tenantClient(user.userId);
-
-  // Un enlace que ya llego por un like de X vive en `contentUrl`; uno agregado a
-  // mano (o por un CSV anterior) vive en las dos columnas. El unique de la tabla es
-  // sobre `tweetId`, no sobre la URL, así que sin este chequeo se duplicaría la fila.
-  const existing = await client.likedItem.findMany({
-    where: { OR: [{ contentUrl: { in: parsed.urls } }, { tweetUrl: { in: parsed.urls } }] },
-    select: { contentUrl: true, tweetUrl: true },
-  });
-  const existingUrls = new Set(
-    existing.flatMap((item) => [item.contentUrl, item.tweetUrl].filter((url): url is string => !!url)),
-  );
-
-  const newUrls = parsed.urls.filter((url) => !existingUrls.has(url));
-
-  if (newUrls.length > 0) {
-    await client.likedItem.createMany({
-      data: newUrls.map((url) => manualItemInput(url, user.userId)),
+  const newUrls = await withOwner(user.userId, async (tx) => {
+    // Un enlace que ya llego por un like de X vive en `contentUrl`; uno agregado a
+    // mano (o por un CSV anterior) vive en las dos columnas. El unique de la tabla
+    // es sobre `tweetId`, no sobre la URL, así que sin este chequeo se duplicaría
+    // la fila.
+    const existing = await tx.likedItem.findMany({
+      where: {
+        ownerId: user.userId,
+        OR: [{ contentUrl: { in: parsed.urls } }, { tweetUrl: { in: parsed.urls } }],
+      },
+      select: { contentUrl: true, tweetUrl: true },
     });
-  }
+    const existingUrls = new Set(
+      existing.flatMap((item) => [item.contentUrl, item.tweetUrl].filter((url): url is string => !!url)),
+    );
+    const fresh = parsed.urls.filter((url) => !existingUrls.has(url));
+
+    if (fresh.length > 0) {
+      await tx.likedItem.createMany({
+        data: fresh.map((url) => manualItemInput(url, user.userId)),
+      });
+    }
+    return fresh;
+  });
 
   return NextResponse.json({
     created: newUrls.length,
