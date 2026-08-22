@@ -9,9 +9,13 @@
 // el usuario ajuste descripciones y ejemplos a su vocabulario, la clasificación
 // mejora — ese es el punto de que sean editables.
 //
-// Fase 3 migrará src/lib/categorize.ts a leer el catálogo del tenant desde la DB;
-// mientras tanto CATEGORY_NAMES / FALLBACK_CATEGORY siguen exportados para que el
-// código que aún no está migrado compile y funcione igual.
+// Fase 3 (hecho): el pipeline (src/lib/categorize.ts, src/lib/jobs/categorize.ts) ya
+// NO importa nada de aquí — lee el catálogo por tenant con src/lib/categories.ts
+// (loadCategories, dentro de withOwner). Este archivo queda como plantilla de seed
+// nada más: solo debe importarlo src/lib/seed-tenant.ts. CATEGORY_NAMES /
+// FALLBACK_CATEGORY / isKnownCategory se mantienen exportados porque UI de fases
+// anteriores (api/categories, /categorias) todavía los usa para ordenar opciones;
+// esas pantallas migrarán a leer `categories` de la DB en Fase 4 (PLAN 4.3).
 
 export type CategoryDefinition = {
   name: string;

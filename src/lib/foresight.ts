@@ -1,30 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { getAnalysisSystemPrompts } from "@/lib/analysis-prompts";
+import { getAnthropicClient, markAnthropicKeyInvalid, recordAnthropicUsage } from "@/lib/anthropic-client";
 import { ANALYSIS_TIMEOUT_MS } from "@/lib/analyze";
 
 /**
- * Foresight: la unica columna del analisis que corre en Claude (claude-opus-5) en vez
- * de Ollama — pedido de Frida (2026-08-17), junto con usar el cache de prompts.
+ * Foresight: la unica columna del analisis que corre en Claude en vez de Ollama —
+ * pedido de Frida (2026-08-17). Desde PLAN 3.7 usa BYOK: cada tenant trae su propia
+ * key Anthropic (src/lib/anthropic-client.ts) en vez de una key global de la
+ * plataforma, así que el job que la llama debe filtrar antes con
+ * `hasVerifiedAnthropicKey(ownerId)` — esta función asume que ya hay key.
  *
- * El system prompt (fijo entre llamadas) lleva el breakpoint de cache_control y lo
- * variable (TL;DR + "por que importa" de cada item) va en el mensaje de usuario,
- * despues del prefijo, para no invalidarlo. Ojo: claude-opus-5 solo cachea prefijos
- * de 512+ tokens, asi que con el prompt default (~250 tokens) el breakpoint queda
- * inerte; si el prompt crece desde la pantalla de Sistema, empieza a cachear solo.
+ * `betas: ["server-side-fallback-2026-07-01"]` + `fallbacks: "default"` dejan que la
+ * API reintente sola en el fallback server-side de ese modelo si el clasificador de
+ * seguridad declina la respuesta, en vez de que este código tenga que hacerlo.
  */
-const MODEL = "claude-opus-5";
-
-let client: Anthropic | null = null;
-
-function getClient(): Anthropic {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error(
-      "Falta ANTHROPIC_API_KEY. Agregala en el proyecto de Vercel (y en .env para correr local) para que la columna Foresight pueda generarse.",
-    );
-  }
-  client ??= new Anthropic();
-  return client;
-}
+const BETAS = ["server-side-fallback-2026-07-01"] as const;
 
 export type ForesightInput = {
   tldr: string;
@@ -34,39 +23,63 @@ export type ForesightInput = {
 /**
  * "Esto que está sucediendo" del prompt = el TL;DR más el "por qué importa" ya
  * generados, asi que este paso corre al final de la cadena del job analyze.
+ *
+ * @param ownerId Tenant dueño del item (y de la key BYOK a usar).
+ * @param systemPrompt Prompt efectivo del tenant (default + override), resuelto por
+ *   el caller UNA vez por corrida — ver src/lib/analysis-prompts.ts.
+ * @returns El texto generado, o `null` si:
+ *   - el tenant no tiene key Anthropic verificada (el caller debería haber evitado
+ *     llegar aquí, pero por si acaso no truena);
+ *   - la key resultó inválida (401): se marca `verifiedAt = null` y se devuelve null
+ *     para que el item quede pendiente, no para tumbar la corrida del tenant;
+ *   - Claude se niega a responder (`stop_reason: "refusal"`): el item queda
+ *     pendiente para reintento manual en vez de guardar un error como si fuera texto.
  */
-export async function generateForesight(input: ForesightInput): Promise<string> {
-  const { foresight } = await getAnalysisSystemPrompts();
+export async function generateForesight(
+  ownerId: string,
+  input: ForesightInput,
+  systemPrompt: string,
+): Promise<string | null> {
+  const clientInfo = await getAnthropicClient(ownerId);
+  if (!clientInfo) return null;
+  const { client, model } = clientInfo;
 
-  const response = await getClient().beta.messages.create(
-    {
-      model: MODEL,
-      max_tokens: 16000,
-      // Si los clasificadores de seguridad declinan el item, el API lo reintenta
-      // server-side en Opus 4.8 dentro de la misma llamada.
-      betas: ["server-side-fallback-2026-06-01"],
-      fallbacks: [{ model: "claude-opus-4-8" }],
-      system: [
-        {
-          type: "text",
-          text: foresight,
-          cache_control: { type: "ephemeral" },
-        },
-      ],
-      messages: [
-        {
-          role: "user",
-          content: `TL;DR:\n${input.tldr}\n\nPor qué es importante:\n${input.whyMatters}`,
-        },
-      ],
-    },
-    // Mismo tope por llamada que el resto del analisis, para que el presupuesto de
-    // tiempo del job (TIME_BUDGET_MS) siga siendo valido.
-    { timeout: ANALYSIS_TIMEOUT_MS },
-  );
+  let response;
+  try {
+    response = await client.beta.messages.create(
+      {
+        model,
+        // 1024, no 16000: la respuesta es un párrafo de ~100 palabras (PLAN 3.7).
+        max_tokens: 1024,
+        betas: [...BETAS],
+        fallbacks: "default",
+        // Sin cache_control: el prompt default son ~250 tokens y Claude solo cachea
+        // prefijos de 512+, así que el breakpoint quedaba inerte (y ahora, con BYOK,
+        // cachear entre llamadas de tenants distintos no aplica de todos modos).
+        system: [{ type: "text", text: systemPrompt }],
+        messages: [
+          {
+            role: "user",
+            content: `TL;DR:\n${input.tldr}\n\nPor qué es importante:\n${input.whyMatters}`,
+          },
+        ],
+      },
+      // Mismo tope por llamada que el resto del analisis, para que el presupuesto de
+      // tiempo del job siga siendo valido.
+      { timeout: ANALYSIS_TIMEOUT_MS },
+    );
+  } catch (error) {
+    if (error instanceof Anthropic.APIError && error.status === 401) {
+      await markAnthropicKeyInvalid(ownerId);
+      return null;
+    }
+    throw error;
+  }
+
+  await recordAnthropicUsage(ownerId, response.usage?.input_tokens, response.usage?.output_tokens);
 
   if (response.stop_reason === "refusal") {
-    throw new Error("Claude declinó generar el foresight de este item");
+    return null;
   }
 
   const text = response.content
@@ -75,6 +88,5 @@ export async function generateForesight(input: ForesightInput): Promise<string> 
     .join("")
     .trim();
 
-  if (!text) throw new Error("Respuesta vacía del modelo de foresight");
-  return text;
+  return text || null;
 }

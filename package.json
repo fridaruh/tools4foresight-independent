@@ -10,7 +10,9 @@
     "qa:tenant": "tsx scripts/qa-tenant-isolation.ts",
     "qa:quota": "tsx scripts/qa-quota.ts",
     "db:app-role": "tsx scripts/setup-app-role.ts",
-    "qa:graph": "tsx scripts/qa-graph-tenant.ts"
+    "qa:graph": "tsx scripts/qa-graph-tenant.ts",
+    "qa:jobs": "tsx scripts/qa-jobs-tenant.ts",
+    "qa:dispatch": "tsx scripts/qa-dispatch.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.117.1",

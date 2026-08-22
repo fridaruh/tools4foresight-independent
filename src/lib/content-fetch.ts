@@ -1,5 +1,10 @@
 const FETCH_TIMEOUT_MS = 8000;
-const USER_AGENT = "x-likes-curator/1.0 (+https://tools-4-foresight.vercel.app)";
+
+// UA amigable con robots.txt: identifica al bot y da una URL de contacto (PLAN 3.3).
+// NEXT_PUBLIC_APP_URL es la misma que ya usa el resto de la app para construir links
+// absolutos; el fallback solo aplica en scripts locales que no la definen.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://tools4foresight.app";
+const USER_AGENT = `tools4foresight-bot/1.0 (+${APP_URL})`;
 
 export type FetchedContent = {
   title: string | null;

@@ -1,58 +1,58 @@
-import { prisma } from "@/lib/prisma";
+// Job de categorización (PLAN 3.4): clasifica los likes de UN tenant contra SU
+// catálogo (tabla `categories`). No corre PESTEL — eso es src/lib/jobs/pestel.ts,
+// que la route encadena por separado con el tiempo que sobre (PLAN 3.5).
+import { loadCategories } from "@/lib/categories";
 import { BATCH_SIZE, categorizeBatch, type CategorizationInput } from "@/lib/categorize";
+import { budgetExceeded, type JobFn } from "@/lib/jobs/types";
+import { withOwner } from "@/lib/tenant-db";
 
 /** Lotes en vuelo al mismo tiempo. Ollama serializa por cuenta arriba de esto. */
 const CONCURRENCY = 4;
 
 /**
- * Tope de items que se leen por corrida. El corte real lo pone TIME_BUDGET_MS; esto solo
- * evita traerse los ~4k pendientes a memoria de una.
+ * Tope de items que se leen por corrida. El corte real lo pone el budget del ctx;
+ * esto solo evita traerse todo el backlog del tenant a memoria de una.
  */
 const MAX_ITEMS_PER_RUN = 800;
 
-/**
- * La funcion tiene maxDuration 300s. El corte se evalua entre oleadas, asi que una que
- * arranca justo antes del limite puede estirarse otro REQUEST_TIMEOUT_MS (90s): 200 + 90
- * sigue cabiendo en los 300s.
- */
-const TIME_BUDGET_MS = 200_000;
+/** Margen para no arrancar un lote que no va a alcanzar a terminar dentro del budget. */
+const BUDGET_MARGIN_MS = 30_000;
 
-/**
- * @param budgetMs Cuanto tiempo puede consumir esta corrida. El default asume que es
- *   el unico trabajo de la funcion; `/api/sync` pasa menos porque antes ya corrio la
- *   ingesta y el fetch de contenido dentro de los mismos 300s.
- */
-export async function categorizePending(budgetMs: number = TIME_BUDGET_MS) {
-  const startedAt = Date.now();
-
-  // Job separado de la ingesta (PLAN 3.3): asi se puede reintentar la
-  // categorizacion sin volver a pedir likes a X.
-  //
-  // Se prioriza lo que ya tiene contenido enriquecido (fetch listo) porque
-  // clasifica mejor con titulo y descripcion que solo con el texto del tweet.
-  const pending = await prisma.likedItem.findMany({
-    // Se excluye lo editado a mano aunque haya quedado sin categoria: si Frida
-    // dejo un item en "Sin categorizar" a proposito, el job no debe rellenarlo.
-    where: { category: null, categorySource: { not: "manual" } },
-    orderBy: [{ fetchStatus: "asc" }, { likedAt: "desc" }],
-    select: {
-      tweetId: true,
-      authorHandle: true,
-      tweetText: true,
-      contentTitle: true,
-      contentDescription: true,
-    },
-    take: MAX_ITEMS_PER_RUN,
+export const runCategorize: JobFn = async (ctx) => {
+  // Lectura corta: catálogo + backlog del tenant, todo dentro de una sola tx breve.
+  // Las llamadas a Ollama (hasta 90s cada una) van DESPUÉS, fuera de withOwner — ver
+  // la nota en src/lib/jobs/types.ts sobre el pooler de Neon.
+  const { categories, pending } = await withOwner(ctx.ownerId, async (tx) => {
+    const categories = await loadCategories(tx, ctx.ownerId);
+    const pending = await tx.likedItem.findMany({
+      // Se excluye lo editado a mano aunque haya quedado sin categoria: si el usuario
+      // dejo un item en "Sin categorizar" a proposito, el job no debe rellenarlo.
+      where: { ownerId: ctx.ownerId, category: null, categorySource: { not: "manual" } },
+      orderBy: [{ fetchStatus: "asc" }, { likedAt: "desc" }],
+      select: {
+        tweetId: true,
+        authorHandle: true,
+        tweetText: true,
+        contentTitle: true,
+        contentDescription: true,
+      },
+      take: MAX_ITEMS_PER_RUN,
+    });
+    return { categories, pending };
   });
 
-  if (pending.length === 0) {
+  if (categories.length === 0) {
     return {
-      ok: true as const,
+      ok: true,
       processed: 0,
-      categorized: 0,
-      newCategories: [] as string[],
-      remaining: 0,
+      remaining: pending.length,
+      stoppedOnBudget: false,
+      error: "Sin categorías definidas",
     };
+  }
+
+  if (pending.length === 0) {
+    return { ok: true, processed: 0, remaining: 0, stoppedOnBudget: false };
   }
 
   const batches: CategorizationInput[][] = [];
@@ -70,15 +70,14 @@ export async function categorizePending(budgetMs: number = TIME_BUDGET_MS) {
     attempted += batch.length;
 
     try {
-      const results = await categorizeBatch(batch);
+      const results = await categorizeBatch(batch, categories);
 
-      // Un solo UPDATE por lote en vez de 20 updateMany dentro de $transaction: con
-      // CONCURRENCY lotes en vuelo, abrir una transaccion por lote agota el pool de
-      // conexiones de Neon y Prisma tira "Unable to start a transaction in the given time".
-      //
-      // El `and category is null` conserva la garantia que daba la transaccion: si Frida
-      // reclasifico un item a mano mientras corria el job, su edicion gana (PLAN 3.3).
-      const written = await prisma.$executeRaw`
+      // Escritura corta, en su propia withOwner: un solo UPDATE por lote (no una tx
+      // por item) para no agotar el pool con CONCURRENCY lotes en vuelo. El
+      // `owner_id` va explícito en el WHERE (cinturón y tirantes sobre RLS) y el
+      // match es por (owner_id, tweet_id) — dos tenants pueden compartir tweet_id
+      // si ambos dieron like al mismo tweet.
+      const written = await withOwner(ctx.ownerId, (tx) => tx.$executeRaw`
         UPDATE liked_items AS li
         SET category = v.category,
             category_source = 'auto',
@@ -95,10 +94,11 @@ export async function categorizePending(budgetMs: number = TIME_BUDGET_MS) {
             ${results.map((r) => r.reasoning)}::text[]
           ) AS t(tweet_id, category, confidence, reasoning)
         ) AS v
-        WHERE li.tweet_id = v.tweet_id
+        WHERE li.owner_id = ${ctx.ownerId}
+          AND li.tweet_id = v.tweet_id
           AND li.category IS NULL
           AND li.category_source <> 'manual'
-      `;
+      `);
       categorized += written;
 
       for (const result of results) {
@@ -111,28 +111,29 @@ export async function categorizePending(budgetMs: number = TIME_BUDGET_MS) {
     }
   }
 
-  // Los lotes son independientes entre si, asi que se corren de a CONCURRENCY en vez de
-  // uno por uno: secuencial, los ~4k items pendientes tardarian mas de una hora.
   for (let i = 0; i < batches.length; i += CONCURRENCY) {
-    if (Date.now() - startedAt > budgetMs) {
+    if (budgetExceeded(ctx, BUDGET_MARGIN_MS)) {
       stoppedOnBudget = true;
       break;
     }
     await Promise.all(batches.slice(i, i + CONCURRENCY).map(runBatch));
   }
 
-  const remaining = await prisma.likedItem.count({ where: { category: null } });
+  const remaining = await withOwner(ctx.ownerId, (tx) =>
+    tx.likedItem.count({ where: { ownerId: ctx.ownerId, category: null } }),
+  );
 
   return {
     // Falla la corrida solo si ningun lote intentado logro escribir: si algunos
     // pasaron, la corrida sirvio y el resto se reintenta en la siguiente.
     ok: categorized > 0 || errors.length === 0,
     processed: attempted,
-    categorized,
-    newCategories: [...newCategories],
     remaining,
     stoppedOnBudget,
-    elapsedMs: Date.now() - startedAt,
-    ...(errors.length > 0 ? { errors: errors.slice(0, 5) } : {}),
+    details: {
+      categorized,
+      newCategories: [...newCategories],
+      ...(errors.length > 0 ? { errors: errors.slice(0, 5) } : {}),
+    },
   };
-}
+};

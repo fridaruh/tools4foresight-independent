@@ -1,4 +1,5 @@
-import { CATEGORIES, FALLBACK_CATEGORY, isKnownCategory } from "@/config/categories";
+import type { Category } from "@/generated/prisma/client";
+import { fallbackCategory } from "@/lib/categories";
 import { ollamaChat, withOneRetry } from "@/lib/ollama";
 
 // Un solo item puede tener poco texto (un tweet suelto) o bastante (tweet + titulo +
@@ -26,11 +27,18 @@ export type CategorizationResult = {
   isNewCategory: boolean;
 };
 
-function buildSystemPrompt(): string {
-  const catalog = CATEGORIES.map((c) => {
-    const examples = c.examples.map((e) => `    - "${e}"`).join("\n");
-    return `- ${c.name}: ${c.description}\n  Ejemplos:\n${examples}`;
-  }).join("\n\n");
+// El catálogo ya no sale de src/config/categories.ts (plantilla de seed): lo carga
+// el caller UNA vez por corrida con src/lib/categories.ts (loadCategories, dentro de
+// withOwner) y lo pasa aquí por parámetro — así esta función no toca la DB ni sabe
+// de tenants.
+export function buildSystemPrompt(categories: Category[]): string {
+  const fallback = fallbackCategory(categories);
+  const catalog = categories
+    .map((c) => {
+      const examples = c.examples.map((e) => `    - "${e}"`).join("\n");
+      return `- ${c.name}: ${c.description}\n  Ejemplos:\n${examples}`;
+    })
+    .join("\n\n");
 
   return `Clasificas tweets que una persona marco como "me gusta", para que pueda reencontrarlos despues.
 
@@ -40,7 +48,7 @@ ${catalog}
 
 Reglas:
 - Asigna exactamente una categoria por item.
-- Prefiere siempre una categoria existente. Solo propon una nueva (isNewCategory: true) cuando el item tiene un tema claro que ninguna categoria cubre y meterlo en "${FALLBACK_CATEGORY}" perderia informacion util.
+- Prefiere siempre una categoria existente. Solo propon una nueva (isNewCategory: true) cuando el item tiene un tema claro que ninguna categoria cubre y meterlo en "${fallback?.name ?? "Otros"}" perderia informacion util.
 - Una categoria nueva se nombra en español o ingles corto, en Title Case, como las existentes.
 - confidence va de 0 a 1: que tan seguro estas de la asignacion.
 - reasoning: una frase corta (max 15 palabras) explicando por que. Sirve para auditar errores de clasificacion.
@@ -106,18 +114,22 @@ function parseResults(raw: string): RawResult[] {
 
 export async function categorizeBatch(
   items: CategorizationInput[],
+  categories: Category[],
 ): Promise<CategorizationResult[]> {
   if (items.length === 0) return [];
 
   // Un lote se pierde entero cuando el modelo trunca el JSON a medias (visto ~1 de cada
   // 40 lotes: "Unterminated fractional number"). Reintentar una vez recupera la mayoria
   // sin volver a leerlos de la DB en la siguiente corrida.
-  return withOneRetry(() => requestBatch(items));
+  return withOneRetry(() => requestBatch(items, categories));
 }
 
-async function requestBatch(items: CategorizationInput[]): Promise<CategorizationResult[]> {
+async function requestBatch(
+  items: CategorizationInput[],
+  categories: Category[],
+): Promise<CategorizationResult[]> {
   const content = await ollamaChat({
-    system: buildSystemPrompt(),
+    system: buildSystemPrompt(categories),
     user: `Clasifica estos ${items.length} items:\n\n${items.map(renderItem).join("\n\n")}`,
     format: RESULT_SCHEMA,
     // Clasificacion acotada: se quiere la misma respuesta ante el mismo item, no
@@ -138,6 +150,9 @@ async function requestBatch(items: CategorizationInput[]): Promise<Categorizatio
     }
   }
 
+  const knownNames = new Set(categories.map((c) => c.name));
+  const fallback = fallbackCategory(categories);
+
   return items.map((item, i) => {
     const result = byIndex.get(i + 1);
     const category = typeof result?.category === "string" ? result.category.trim() : "";
@@ -145,7 +160,7 @@ async function requestBatch(items: CategorizationInput[]): Promise<Categorizatio
     if (!category) {
       return {
         tweetId: item.tweetId,
-        category: FALLBACK_CATEGORY,
+        category: fallback?.name ?? "Otros",
         confidence: 0,
         reasoning: "El modelo no devolvio resultado para este item.",
         isNewCategory: false,
@@ -161,8 +176,9 @@ async function requestBatch(items: CategorizationInput[]): Promise<Categorizatio
       // de 0.85) y eso descuadraria cualquier filtro por confianza.
       confidence: Math.min(1, Math.max(0, confidence > 1 ? confidence / 100 : confidence)),
       reasoning: typeof result?.reasoning === "string" ? result.reasoning : "",
-      // La bandera del modelo no decide: manda si el nombre esta o no en el catalogo.
-      isNewCategory: !isKnownCategory(category),
+      // La bandera del modelo no decide: manda si el nombre esta o no en el catalogo
+      // DEL TENANT.
+      isNewCategory: !knownNames.has(category),
     };
   });
 }

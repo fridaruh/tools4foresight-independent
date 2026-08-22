@@ -1,12 +1,18 @@
-import { prisma } from "@/lib/prisma";
+import type { TenantTx } from "@/lib/tenant-db";
 
 /**
  * System prompts del análisis, editables desde la pantalla de Sistema.
  *
  * Los defaults viven aquí (movidos de analyze.ts) para que el generador y la UI
- * compartan una sola fuente. La tabla prompt_settings guarda solo los overrides:
- * sin fila (o con texto en blanco) rige el default, así "restaurar" es borrar la
- * fila y un default mejorado en el código llega solo a quien no personalizó.
+ * compartan una sola fuente. La tabla prompt_settings guarda solo los overrides,
+ * uno por tenant: sin fila (o con texto en blanco) rige el default, así "restaurar"
+ * es borrar la fila y un default mejorado en el código llega solo a quien no
+ * personalizó.
+ *
+ * Fase 3 (PLAN 3.6): `getAnalysisSystemPrompts` recibe `tx`/`ownerId` en vez de leer
+ * `prisma` global sin filtrar — sin ownerId, dos tenants leerían los overrides del
+ * otro. El job de análisis la llama UNA vez por corrida (no por item) y pasa el
+ * resultado a cada llamada de generación.
  */
 
 /** Cuantas palabras pidio Frida por respuesta. Va literal a los dos prompts. */
@@ -74,10 +80,13 @@ export const PROMPT_DEFAULTS: Record<PromptKey, string> = {
   foresight: DEFAULT_FORESIGHT_SYSTEM,
 };
 
-/** El override guardado para cada clave, o null si rige el default. */
-export async function getPromptOverrides(): Promise<Record<PromptKey, string | null>> {
-  const rows = await prisma.promptSetting.findMany({
-    where: { key: { in: [...PROMPT_KEYS] } },
+/** El override guardado para cada clave DEL TENANT `ownerId`, o null si rige el default. */
+export async function getPromptOverrides(
+  tx: TenantTx,
+  ownerId: string,
+): Promise<Record<PromptKey, string | null>> {
+  const rows = await tx.promptSetting.findMany({
+    where: { ownerId, key: { in: [...PROMPT_KEYS] } },
   });
   const byKey = new Map(rows.map((row) => [row.key, row.value]));
   const overrideOf = (key: PromptKey) => {
@@ -92,14 +101,17 @@ export async function getPromptOverrides(): Promise<Record<PromptKey, string | n
   };
 }
 
-/** Los system prompts efectivos (override si existe, default si no). */
-export async function getAnalysisSystemPrompts(): Promise<{
+/** Los system prompts efectivos del tenant (override si existe, default si no). */
+export async function getAnalysisSystemPrompts(
+  tx: TenantTx,
+  ownerId: string,
+): Promise<{
   tldr: string;
   impact: string;
   whyMatters: string;
   foresight: string;
 }> {
-  const overrides = await getPromptOverrides();
+  const overrides = await getPromptOverrides(tx, ownerId);
   return {
     tldr: overrides.tldr ?? DEFAULT_TLDR_SYSTEM,
     impact: overrides.impact ?? DEFAULT_IMPACT_SYSTEM,
