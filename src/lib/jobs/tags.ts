@@ -1,10 +1,12 @@
 // Job de etiquetas por tenant: genera de 3 a 5 etiquetas descriptivas por señal
-// (LikedItem PUBLICADO) con Ollama. Mismo patrón que src/lib/jobs/pestel.ts:
-// lectura corta dentro de withOwner, la llamada al modelo fuera de toda
-// transacción, escritura corta por lote.
+// con Ollama. Mismo patrón que src/lib/jobs/pestel.ts: lectura corta dentro de
+// withOwner, la llamada al modelo fuera de toda transacción, escritura corta
+// por lote.
 //
-// Solo señales publicadas (igual que embed.ts y graph.ts): el catálogo crudo no
-// necesita etiquetas, la vista curada del grafo sí.
+// A diferencia de embed.ts y graph.ts, NO se limita a señales publicadas
+// (decisión de Frida, 2026-08-23): sirve como ayuda de curación en la tabla de
+// enriquecimiento, antes de decidir si algo se publica o no. Sí se salta lo
+// descartado (enrichDiscarded), igual que analyze.ts.
 import { TAGS_BATCH_SIZE, tagsGenerateBatch, type TagsGenerateInput } from "@/lib/tags-generate";
 import { budgetExceeded, type JobFn } from "@/lib/jobs/types";
 import { withOwner } from "@/lib/tenant-db";
@@ -14,7 +16,7 @@ const MAX_ITEMS_PER_RUN = 400;
 const BUDGET_MARGIN_MS = 15_000;
 
 const PENDING_WHERE = {
-  publishStatus: "published",
+  enrichDiscarded: false,
   tags: { equals: [] as string[] },
   tagsSource: { not: "manual" },
 } as const;
@@ -23,7 +25,7 @@ export const runTags: JobFn = async (ctx) => {
   const pending = await withOwner(ctx.ownerId, (tx) =>
     tx.likedItem.findMany({
       where: { ownerId: ctx.ownerId, ...PENDING_WHERE },
-      orderBy: [{ publishedAt: "desc" }],
+      orderBy: [{ likedAt: "desc" }],
       select: { tweetId: true, tweetText: true, contentTitle: true, contentDescription: true },
       take: MAX_ITEMS_PER_RUN,
     }),
