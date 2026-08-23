@@ -100,11 +100,19 @@ export default async function ConexionPage({
       data-section="conexion"
       className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-8 sm:px-10"
     >
-      <header>
-        <h1 className="section-title text-ink">Sistema</h1>
-        <p className="text-sm text-ink-subtle">
-          Tu cuenta de X, tus cuotas del día y el historial de corridas.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="section-title text-ink">Sistema</h1>
+          <p className="text-sm text-ink-subtle">
+            Tu cuenta de X, tus cuotas del día y el historial de corridas.
+          </p>
+        </div>
+        <Link
+          href="/metodologia"
+          className="nav-label border border-ink bg-ink px-3 py-1.5 text-brand-white transition-colors duration-150 hover:border-brand-orange hover:bg-brand-orange"
+        >
+          Metodología →
+        </Link>
       </header>
 
       {xCreditsDepleted && (

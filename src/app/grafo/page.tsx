@@ -21,6 +21,7 @@ export default async function GrafoPage() {
           tldr: true,
           clusterId: true,
           vitality: true,
+          contentPublishedAt: true,
         },
       }),
       // El filtro por estado de ambos extremos cubre la ventana entre despublicar
@@ -48,6 +49,7 @@ export default async function GrafoPage() {
       tldr: item.tldr,
       clusterId: item.clusterId,
       vitality: item.vitality,
+      publishedAt: item.contentPublishedAt?.toISOString() ?? null,
     })),
     links: links.map((link) => ({ source: link.itemAId, target: link.itemBId, score: link.score })),
     clusters,

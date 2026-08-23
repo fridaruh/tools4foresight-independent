@@ -18,6 +18,9 @@ export type GraphNode = {
   /** 0..1, decae con vida media de 30 dias salvo que lleguen vecinas nuevas
    *  (src/lib/jobs/graph.ts). null = el grafo aun no corrio desde que existe. */
   vitality: number | null;
+  /** Fecha de publicación del contenido (no de cuándo se detectó). null = no se
+   *  pudo extraer — esas señales se ven desde el primer paso de la línea de tiempo. */
+  publishedAt: string | null;
 };
 
 export type GraphCluster = {
@@ -118,7 +121,31 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showFossils, setShowFossils] = useState(false);
+  const [themePanelOpen, setThemePanelOpen] = useState(true);
   const fossilCount = payload.nodes.filter((n) => vitalityOf(n) < FOSSIL_THRESHOLD).length;
+
+  // Línea de tiempo por fecha de publicación (no por cuándo se detectó la señal):
+  // el paso 0 muestra solo lo que no tiene fecha, y cada paso siguiente suma un
+  // bloque de 3 años más — nunca quita lo que ya se veía. "Ver todas" ignora el
+  // filtro por completo.
+  const publishedYears = useMemo(
+    () =>
+      payload.nodes
+        .map((n) => (n.publishedAt ? new Date(n.publishedAt).getFullYear() : null))
+        .filter((y): y is number => y !== null),
+    [payload],
+  );
+  const timelineCutoffs = useMemo(() => {
+    if (publishedYears.length === 0) return [0];
+    const minYear = Math.min(...publishedYears);
+    const maxYear = Math.max(...publishedYears);
+    const cutoffs = [minYear - 1];
+    for (let y = minYear; y <= maxYear; y += 3) cutoffs.push(y + 2);
+    return cutoffs;
+  }, [publishedYears]);
+  const [timelineIndex, setTimelineIndex] = useState(0);
+  const [showAllDates, setShowAllDates] = useState(false);
+  const undatedCount = payload.nodes.length - publishedYears.length;
 
   const nodeById = useMemo(() => new Map(payload.nodes.map((n) => [n.id, n])), [payload]);
 
@@ -177,6 +204,10 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
 
   function isVisible(node: GraphNode): boolean {
     if (!showFossils && vitalityOf(node) < FOSSIL_THRESHOLD) return false;
+    if (!showAllDates && node.publishedAt) {
+      const year = new Date(node.publishedAt).getFullYear();
+      if (year > timelineCutoffs[timelineIndex]) return false;
+    }
     if (colorMode === "tema") return !hiddenClusters.has(node.clusterId ?? NO_CLUSTER_KEY);
     return !hiddenFamilies.has(familyOf(node.category));
   }
@@ -193,7 +224,7 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
         .map((link) => ({ ...link })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload, hiddenFamilies, hiddenClusters, colorMode, showFossils]);
+  }, [payload, hiddenFamilies, hiddenClusters, colorMode, showFossils, timelineIndex, showAllDates, timelineCutoffs]);
 
   // Si el nodo seleccionado desaparece del lienzo (filtro), el panel se cierra.
   // El setState en el efecto es necesario para sincronizar el panel cerrado con el filtro aplicado.
@@ -209,15 +240,11 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
     }
 
     // Verificar si el nodo sigue visible con los filtros actuales
-    const isStillVisible =
-      (showFossils || vitalityOf(node) >= FOSSIL_THRESHOLD) &&
-      (colorMode !== "tema" || !hiddenClusters.has(node.clusterId ?? NO_CLUSTER_KEY)) &&
-      (colorMode === "tema" || !hiddenFamilies.has(familyOf(node.category)));
-
-    if (!isStillVisible) {
+    if (!isVisible(node)) {
       setSelectedId(null);
     }
-  }, [selectedId, nodeById, colorMode, hiddenClusters, hiddenFamilies, showFossils]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, nodeById, colorMode, hiddenClusters, hiddenFamilies, showFossils, timelineIndex, showAllDates]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function toggleFamily(family: string) {
@@ -314,50 +341,9 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
             </div>
           )}
           </div>
-          <div className="flex max-w-2xl flex-wrap items-center justify-end gap-2">
-            {colorMode === "tema" ? (
-              <>
-                {payload.clusters.map((cluster) => {
-                  const hidden = hiddenClusters.has(cluster.id);
-                  return (
-                    <button
-                      key={cluster.id}
-                      type="button"
-                      onClick={() => toggleCluster(cluster.id)}
-                      aria-pressed={!hidden}
-                      title={
-                        cluster.status === "dead"
-                          ? `Tema muerto (sin señales nuevas). ${cluster.summary || ""}`.trim()
-                          : cluster.summary || cluster.name
-                      }
-                      className={chipClass(hidden || cluster.status === "dead")}
-                    >
-                      <span
-                        aria-hidden
-                        className="h-1.5 w-1.5 shrink-0"
-                        style={{ backgroundColor: cluster.status === "dead" ? NO_CLUSTER_COLOR : clusterColor.get(cluster.id) }}
-                      />
-                      {cluster.status === "dead" && <span aria-hidden>†</span>}
-                      {cluster.name}
-                    </button>
-                  );
-                })}
-                <button
-                  type="button"
-                  onClick={() => toggleCluster(NO_CLUSTER_KEY)}
-                  aria-pressed={!hiddenClusters.has(NO_CLUSTER_KEY)}
-                  className={chipClass(hiddenClusters.has(NO_CLUSTER_KEY))}
-                >
-                  <span
-                    aria-hidden
-                    className="h-1.5 w-1.5 shrink-0"
-                    style={{ backgroundColor: NO_CLUSTER_COLOR }}
-                  />
-                  sin tema
-                </button>
-              </>
-            ) : (
-              Object.entries(FAMILY_COLORS).map(([family, color]) => {
+          {colorMode === "categoria" && (
+            <div className="flex max-w-2xl flex-wrap items-center justify-end gap-2">
+              {Object.entries(FAMILY_COLORS).map(([family, color]) => {
                 const hidden = hiddenFamilies.has(family);
                 return (
                   <button
@@ -371,11 +357,50 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
                     {family}
                   </button>
                 );
-              })
-            )}
-          </div>
+              })}
+            </div>
+          )}
         </div>
       </header>
+
+      {timelineCutoffs.length > 1 && (
+        <div className="flex flex-wrap items-center gap-3 border border-hairline bg-surface-1 px-3 py-2">
+          <p className="label-mono text-[10px] uppercase tracking-[0.06em] text-ink-tertiary">
+            Fecha de publicación
+          </p>
+          <input
+            type="range"
+            min={0}
+            max={timelineCutoffs.length - 1}
+            step={1}
+            value={timelineIndex}
+            disabled={showAllDates}
+            onChange={(event) => setTimelineIndex(Number(event.target.value))}
+            aria-label="Avanzar la línea de tiempo por bloques de 3 años"
+            className="w-48 accent-ink disabled:opacity-40"
+          />
+          <span className="label-mono min-w-24 text-[10px] text-ink-subtle">
+            {showAllDates
+              ? "todas las fechas"
+              : timelineIndex === 0
+                ? `sin fecha (${undatedCount})`
+                : `hasta ${timelineCutoffs[timelineIndex]}`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowAllDates((v) => !v)}
+            aria-pressed={showAllDates}
+            className={`label-mono border border-hairline px-2.5 py-1 text-[10px] uppercase tracking-[0.06em] transition-colors duration-150 ${
+              showAllDates ? "bg-ink text-canvas" : "text-ink-muted hover:text-ink"
+            }`}
+          >
+            Ver todas
+          </button>
+          <span className="label-mono ml-auto text-[10px] text-ink-tertiary">
+            {graphData.nodes.length} de {payload.nodes.length} visibles
+          </span>
+        </div>
+      )}
 
       <div className="relative flex-1 overflow-hidden border border-hairline bg-surface-1">
         <GraphCanvas
@@ -411,17 +436,66 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
           </div>
         )}
 
-        {/* Leyenda de tamaño: pedida por Frida — que el lienzo diga que significa. */}
-        <div className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-2 border border-hairline bg-canvas/95 px-2.5 py-1.5">
-          <span className="flex items-end gap-1" aria-hidden>
-            <span className="h-1.5 w-1.5 rounded-full bg-ink-tertiary" />
-            <span className="h-2.5 w-2.5 rounded-full bg-ink-tertiary" />
-            <span className="h-4 w-4 rounded-full bg-ink-tertiary" />
-          </span>
-          <span className="label-mono text-[10px] uppercase tracking-[0.06em] text-ink-tertiary">
-            tamaño = conexiones
-          </span>
-        </div>
+        {/* Panel de temas: solo en modo "por tema", alfabético y colapsable. */}
+        {colorMode === "tema" && payload.clusters.length > 0 && (
+          <div className="absolute left-3 top-3 z-10 flex max-h-[calc(100%-1.5rem)] w-56 flex-col border border-hairline bg-canvas/95">
+            <button
+              type="button"
+              onClick={() => setThemePanelOpen((v) => !v)}
+              aria-expanded={themePanelOpen}
+              className="label-mono flex items-center justify-between gap-2 px-2.5 py-1.5 text-[10px] uppercase tracking-[0.06em] text-ink-muted hover:text-ink"
+            >
+              Temas · {payload.clusters.length}
+              <span aria-hidden>{themePanelOpen ? "–" : "+"}</span>
+            </button>
+            {themePanelOpen && (
+              <div className="flex flex-col gap-0.5 overflow-y-auto border-t border-hairline p-1.5">
+                {[...payload.clusters]
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((cluster) => {
+                    const hidden = hiddenClusters.has(cluster.id);
+                    return (
+                      <button
+                        key={cluster.id}
+                        type="button"
+                        onClick={() => toggleCluster(cluster.id)}
+                        aria-pressed={!hidden}
+                        title={
+                          cluster.status === "dead"
+                            ? `Tema muerto (sin señales nuevas). ${cluster.summary || ""}`.trim()
+                            : cluster.summary || cluster.name
+                        }
+                        className={`label-mono flex items-center gap-1.5 px-1.5 py-1 text-left text-[10px] transition-colors duration-150 ${
+                          hidden || cluster.status === "dead" ? "text-ink-tertiary opacity-50" : "text-ink-muted hover:text-ink"
+                        }`}
+                      >
+                        <span
+                          aria-hidden
+                          className="h-1.5 w-1.5 shrink-0"
+                          style={{ backgroundColor: cluster.status === "dead" ? NO_CLUSTER_COLOR : clusterColor.get(cluster.id) }}
+                        />
+                        <span className="truncate">
+                          {cluster.status === "dead" && <span aria-hidden>† </span>}
+                          {cluster.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                <button
+                  type="button"
+                  onClick={() => toggleCluster(NO_CLUSTER_KEY)}
+                  aria-pressed={!hiddenClusters.has(NO_CLUSTER_KEY)}
+                  className={`label-mono flex items-center gap-1.5 px-1.5 py-1 text-left text-[10px] transition-colors duration-150 ${
+                    hiddenClusters.has(NO_CLUSTER_KEY) ? "text-ink-tertiary opacity-50" : "text-ink-muted hover:text-ink"
+                  }`}
+                >
+                  <span aria-hidden className="h-1.5 w-1.5 shrink-0" style={{ backgroundColor: NO_CLUSTER_COLOR }} />
+                  sin tema
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Panel de detalle: idea principal, señales mas parecidas y el tema. */}
         {selected && (
