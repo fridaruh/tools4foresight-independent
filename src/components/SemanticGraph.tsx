@@ -117,35 +117,12 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
   const hasClusters = payload.clusters.length > 0;
   const [colorMode, setColorMode] = useState<"tema" | "categoria">(hasClusters ? "tema" : "categoria");
   const [hiddenFamilies, setHiddenFamilies] = useState<Set<string>>(new Set());
-  const [hiddenClusters, setHiddenClusters] = useState<Set<string>>(new Set());
+  const [highlightedClusterId, setHighlightedClusterId] = useState<string | null>(null);
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showFossils, setShowFossils] = useState(false);
   const [themePanelOpen, setThemePanelOpen] = useState(true);
   const fossilCount = payload.nodes.filter((n) => vitalityOf(n) < FOSSIL_THRESHOLD).length;
-
-  // Línea de tiempo por fecha de publicación (no por cuándo se detectó la señal):
-  // el paso 0 muestra solo lo que no tiene fecha, y cada paso siguiente suma un
-  // bloque de 3 años más — nunca quita lo que ya se veía. "Ver todas" ignora el
-  // filtro por completo.
-  const publishedYears = useMemo(
-    () =>
-      payload.nodes
-        .map((n) => (n.publishedAt ? new Date(n.publishedAt).getFullYear() : null))
-        .filter((y): y is number => y !== null),
-    [payload],
-  );
-  const timelineCutoffs = useMemo(() => {
-    if (publishedYears.length === 0) return [0];
-    const minYear = Math.min(...publishedYears);
-    const maxYear = Math.max(...publishedYears);
-    const cutoffs = [minYear - 1];
-    for (let y = minYear; y <= maxYear; y += 3) cutoffs.push(y + 2);
-    return cutoffs;
-  }, [publishedYears]);
-  const [timelineIndex, setTimelineIndex] = useState(0);
-  const [showAllDates, setShowAllDates] = useState(false);
-  const undatedCount = payload.nodes.length - publishedYears.length;
 
   const nodeById = useMemo(() => new Map(payload.nodes.map((n) => [n.id, n])), [payload]);
 
@@ -204,12 +181,8 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
 
   function isVisible(node: GraphNode): boolean {
     if (!showFossils && vitalityOf(node) < FOSSIL_THRESHOLD) return false;
-    if (!showAllDates && node.publishedAt) {
-      const year = new Date(node.publishedAt).getFullYear();
-      if (year > timelineCutoffs[timelineIndex]) return false;
-    }
-    if (colorMode === "tema") return !hiddenClusters.has(node.clusterId ?? NO_CLUSTER_KEY);
-    return !hiddenFamilies.has(familyOf(node.category));
+    if (colorMode === "categoria") return !hiddenFamilies.has(familyOf(node.category));
+    return true;
   }
 
   const graphData = useMemo(() => {
@@ -224,7 +197,7 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
         .map((link) => ({ ...link })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payload, hiddenFamilies, hiddenClusters, colorMode, showFossils, timelineIndex, showAllDates, timelineCutoffs]);
+  }, [payload, hiddenFamilies, colorMode, showFossils]);
 
   // Si el nodo seleccionado desaparece del lienzo (filtro), el panel se cierra.
   // El setState en el efecto es necesario para sincronizar el panel cerrado con el filtro aplicado.
@@ -244,7 +217,7 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
       setSelectedId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, nodeById, colorMode, hiddenClusters, hiddenFamilies, showFossils, timelineIndex, showAllDates]);
+  }, [selectedId, nodeById, colorMode, hiddenFamilies, showFossils]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   function toggleFamily(family: string) {
@@ -256,13 +229,8 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
     });
   }
 
-  function toggleCluster(key: string) {
-    setHiddenClusters((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+  function toggleClusterHighlight(key: string) {
+    setHighlightedClusterId((prev) => (prev === key ? null : key));
   }
 
   if (payload.nodes.length === 0) {
@@ -363,45 +331,6 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
         </div>
       </header>
 
-      {timelineCutoffs.length > 1 && (
-        <div className="flex flex-wrap items-center gap-3 border border-hairline bg-surface-1 px-3 py-2">
-          <p className="label-mono text-[10px] uppercase tracking-[0.06em] text-ink-tertiary">
-            Fecha de publicación
-          </p>
-          <input
-            type="range"
-            min={0}
-            max={timelineCutoffs.length - 1}
-            step={1}
-            value={timelineIndex}
-            disabled={showAllDates}
-            onChange={(event) => setTimelineIndex(Number(event.target.value))}
-            aria-label="Avanzar la línea de tiempo por bloques de 3 años"
-            className="w-48 accent-ink disabled:opacity-40"
-          />
-          <span className="label-mono min-w-24 text-[10px] text-ink-subtle">
-            {showAllDates
-              ? "todas las fechas"
-              : timelineIndex === 0
-                ? `sin fecha (${undatedCount})`
-                : `hasta ${timelineCutoffs[timelineIndex]}`}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowAllDates((v) => !v)}
-            aria-pressed={showAllDates}
-            className={`label-mono border border-hairline px-2.5 py-1 text-[10px] uppercase tracking-[0.06em] transition-colors duration-150 ${
-              showAllDates ? "bg-ink text-canvas" : "text-ink-muted hover:text-ink"
-            }`}
-          >
-            Ver todas
-          </button>
-          <span className="label-mono ml-auto text-[10px] text-ink-tertiary">
-            {graphData.nodes.length} de {payload.nodes.length} visibles
-          </span>
-        </div>
-      )}
-
       <div className="relative flex-1 overflow-hidden border border-hairline bg-surface-1">
         <GraphCanvas
           graphData={graphData}
@@ -410,6 +339,7 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
           colorOf={(node) => colorOf(node)}
           activeId={hoveredId ?? selectedId}
           selectedId={selectedId}
+          highlightedClusterId={highlightedClusterId}
           onHover={(node) => setHoveredId(node?.id ?? null)}
           onSelect={(node) => setSelectedId(node.id)}
           onBackgroundClick={() => setSelectedId(null)}
@@ -450,23 +380,37 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
             </button>
             {themePanelOpen && (
               <div className="flex flex-col gap-0.5 overflow-y-auto border-t border-hairline p-1.5">
+                {highlightedClusterId !== null && (
+                  <button
+                    type="button"
+                    onClick={() => setHighlightedClusterId(null)}
+                    className="label-mono mb-0.5 px-1.5 py-1 text-left text-[10px] uppercase tracking-[0.06em] text-ink-tertiary hover:text-ink"
+                  >
+                    Quitar resaltado
+                  </button>
+                )}
                 {[...payload.clusters]
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .map((cluster) => {
-                    const hidden = hiddenClusters.has(cluster.id);
+                    const active = highlightedClusterId === cluster.id;
+                    const dimmed = highlightedClusterId !== null && !active;
                     return (
                       <button
                         key={cluster.id}
                         type="button"
-                        onClick={() => toggleCluster(cluster.id)}
-                        aria-pressed={!hidden}
+                        onClick={() => toggleClusterHighlight(cluster.id)}
+                        aria-pressed={active}
                         title={
                           cluster.status === "dead"
                             ? `Tema muerto (sin señales nuevas). ${cluster.summary || ""}`.trim()
                             : cluster.summary || cluster.name
                         }
                         className={`label-mono flex items-center gap-1.5 px-1.5 py-1 text-left text-[10px] transition-colors duration-150 ${
-                          hidden || cluster.status === "dead" ? "text-ink-tertiary opacity-50" : "text-ink-muted hover:text-ink"
+                          active
+                            ? "bg-ink text-canvas"
+                            : cluster.status === "dead" || dimmed
+                              ? "text-ink-tertiary opacity-50"
+                              : "text-ink-muted hover:text-ink"
                         }`}
                       >
                         <span
@@ -483,10 +427,14 @@ export function SemanticGraph({ payload }: { payload: GraphPayload }) {
                   })}
                 <button
                   type="button"
-                  onClick={() => toggleCluster(NO_CLUSTER_KEY)}
-                  aria-pressed={!hiddenClusters.has(NO_CLUSTER_KEY)}
+                  onClick={() => toggleClusterHighlight(NO_CLUSTER_KEY)}
+                  aria-pressed={highlightedClusterId === NO_CLUSTER_KEY}
                   className={`label-mono flex items-center gap-1.5 px-1.5 py-1 text-left text-[10px] transition-colors duration-150 ${
-                    hiddenClusters.has(NO_CLUSTER_KEY) ? "text-ink-tertiary opacity-50" : "text-ink-muted hover:text-ink"
+                    highlightedClusterId === NO_CLUSTER_KEY
+                      ? "bg-ink text-canvas"
+                      : highlightedClusterId !== null
+                        ? "text-ink-tertiary opacity-50"
+                        : "text-ink-muted hover:text-ink"
                   }`}
                 >
                   <span aria-hidden className="h-1.5 w-1.5 shrink-0" style={{ backgroundColor: NO_CLUSTER_COLOR }} />
@@ -632,6 +580,7 @@ function GraphCanvas({
   colorOf,
   activeId,
   selectedId,
+  highlightedClusterId,
   onHover,
   onSelect,
   onBackgroundClick,
@@ -643,6 +592,8 @@ function GraphCanvas({
   /** Nodo cuyo vecindario se resalta (hover, o la seleccion si no hay hover). */
   activeId: string | null;
   selectedId: string | null;
+  /** Tema resaltado desde el panel de la izquierda: atenua todo lo que no es miembro. */
+  highlightedClusterId: string | null;
   onHover: (node: GraphNode | null) => void;
   onSelect: (node: GraphNode) => void;
   onBackgroundClick: () => void;
@@ -660,9 +611,18 @@ function GraphCanvas({
     return () => observer.disconnect();
   }, []);
 
-  function isInNeighborhood(id: string): boolean {
+  // Mapa auxiliar id → clave de tema, para revisar los extremos de un link sin
+  // depender de que force-graph ya haya resuelto source/target a objetos.
+  const nodeClusterKey = useMemo(() => {
+    const map = new Map<string, string>();
+    graphData.nodes.forEach((n) => map.set(n.id, n.clusterId ?? NO_CLUSTER_KEY));
+    return map;
+  }, [graphData]);
+
+  function isEmphasized(node: CanvasNode): boolean {
+    if (highlightedClusterId) return (node.clusterId ?? NO_CLUSTER_KEY) === highlightedClusterId;
     if (!activeId) return true;
-    return id === activeId || (neighbors.get(activeId)?.has(id) ?? false);
+    return node.id === activeId || (neighbors.get(activeId)?.has(node.id) ?? false);
   }
 
   return (
@@ -688,7 +648,7 @@ function GraphCanvas({
             const n = node as CanvasNode;
             const color = colorOf(n);
             const alpha = 0.25 + 0.75 * Math.min(1, vitalityOf(n));
-            return isInNeighborhood(n.id) ? withAlpha(color, alpha) : withAlpha(color, 0.15);
+            return isEmphasized(n) ? withAlpha(color, alpha) : withAlpha(color, 0.15);
           }}
           nodeLabel={() => ""}
           nodeCanvasObjectMode={() => "after"}
@@ -710,7 +670,7 @@ function GraphCanvas({
             // mas zoom, todos. Asi el grafo se lee sin depender del hover.
             const isHub = (degree.get(n.id) ?? 0) >= 5;
             if (globalScale < 2.4 && !(isHub && globalScale >= 1.4)) return;
-            if (!isInNeighborhood(n.id)) return;
+            if (!isEmphasized(n)) return;
             const label = n.label.length > 32 ? `${n.label.slice(0, 32)}…` : n.label;
             ctx.font = `${11 / globalScale}px Inter, sans-serif`;
             ctx.textAlign = "center";
@@ -720,6 +680,12 @@ function GraphCanvas({
           }}
           linkColor={(link) => {
             const l = link as CanvasLink;
+            if (highlightedClusterId) {
+              const bothInCluster =
+                nodeClusterKey.get(linkEndId(l.source)) === highlightedClusterId &&
+                nodeClusterKey.get(linkEndId(l.target)) === highlightedClusterId;
+              return bothInCluster ? "#b5b5b0" : "#dcdcd722";
+            }
             if (!activeId) return "#dcdcd7";
             const touchesActive = linkEndId(l.source) === activeId || linkEndId(l.target) === activeId;
             return touchesActive ? "#b5b5b0" : "#dcdcd722";

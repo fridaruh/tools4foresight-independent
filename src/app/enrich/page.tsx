@@ -31,11 +31,11 @@ export default async function EnrichPage({
   // Descartar saca el item de esta tabla, no del catalogo: la pantalla de likes lo
   // sigue mostrando. `?descartados=1` es la vista para revisarlos y devolverlos.
   const discardedView = params.get("descartados") === "1";
-  // Por default se ve la cola de revision (pendientes): lo descartado (que ahora
-  // incluye lo "no relevante", unificado con la lista de descartados) no aparece
-  // hasta que se entra a "Ver descartados".
+  // Por default se ve lo ya publicado: la cola de pendientes queda a un click en
+  // su pestaña. Lo descartado (que ahora incluye lo "no relevante", unificado con
+  // la lista de descartados) no aparece hasta que se entra a "Ver descartados".
   const estadoParam = params.get("estado");
-  const publishFilter: PublishStatus = isPublishStatus(estadoParam) ? estadoParam : "pending";
+  const publishFilter: PublishStatus = isPublishStatus(estadoParam) ? estadoParam : "published";
   const where = {
     ...buildWhere(filters),
     enrichDiscarded: discardedView,
@@ -114,7 +114,7 @@ export default async function EnrichPage({
   const estadoHref = (estado: "pending" | "published") => {
     const next = new URLSearchParams(params);
     next.delete("page");
-    if (estado === "pending") next.delete("estado");
+    if (estado === "published") next.delete("estado");
     else next.set("estado", estado);
     const query = next.toString();
     return query ? `/enrich?${query}` : "/enrich";
@@ -166,7 +166,7 @@ export default async function EnrichPage({
           </Link>
         ) : (
           <div className="label-mono flex border border-hairline">
-            {(["pending", "published"] as const).map((estado) => (
+            {(["published", "pending"] as const).map((estado) => (
               <Link
                 key={estado}
                 href={estadoHref(estado)}
