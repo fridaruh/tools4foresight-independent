@@ -4,6 +4,8 @@ import { useState } from "react";
 import { HORIZON_COLORS } from "@/components/HorizontesBoard";
 import type { HorizonKey } from "@/lib/horizons";
 
+export type MacroThemeMember = { id: string; name: string; summary: string; size: number };
+
 export type MacroTheme = {
   id: string;
   name: string;
@@ -13,6 +15,8 @@ export type MacroTheme = {
   size: number;
   /** Cuántos temas finos agrupa (1 = no se agrupó nada, es un tema suelto). */
   clusterCount: number;
+  /** Los temas finos que agrupa, para desagregar en el popup. */
+  members: MacroThemeMember[];
 };
 
 const COLUMN_TITLES: Record<HorizonKey, string> = {
@@ -76,46 +80,76 @@ export function MacroHorizonBoard({ themes }: { themes: MacroTheme[] }) {
         ))}
       </div>
 
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setSelected(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal
-            onClick={(event) => event.stopPropagation()}
-            className="flex max-h-[80vh] w-full max-w-lg flex-col gap-3 overflow-y-auto border border-ink bg-canvas p-5"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span
-                  aria-hidden
-                  className="h-2.5 w-2.5 shrink-0"
-                  style={{ backgroundColor: HORIZON_COLORS[selected.horizon] }}
-                />
-                <p className="label-mono text-ink-tertiary">{COLUMN_TITLES[selected.horizon]}</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelected(null)}
-                aria-label="Cerrar"
-                className="text-ink-tertiary hover:text-ink"
-              >
-                ×
-              </button>
-            </div>
-            <h3 className="text-lg font-medium text-ink">{selected.name}</h3>
-            <p className="text-sm leading-relaxed text-ink-subtle">
-              {selected.summary || "Sin descripción todavía."}
-            </p>
-            <p className="label-mono text-[10px] text-ink-tertiary">
-              {selected.size} señales
-              {selected.clusterCount > 1 ? ` · agrupa ${selected.clusterCount} temas` : ""}
-            </p>
-          </div>
-        </div>
-      )}
+      {selected && <MacroThemeModal theme={selected} onClose={() => setSelected(null)} />}
     </section>
+  );
+}
+
+function MacroThemeModal({ theme, onClose }: { theme: MacroTheme; onClose: () => void }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-modal
+        onClick={(event) => event.stopPropagation()}
+        className="flex max-h-[80vh] w-full max-w-lg flex-col gap-3 overflow-y-auto border border-ink bg-canvas p-5"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span aria-hidden className="h-2.5 w-2.5 shrink-0" style={{ backgroundColor: HORIZON_COLORS[theme.horizon] }} />
+            <p className="label-mono text-ink-tertiary">{COLUMN_TITLES[theme.horizon]}</p>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar" className="text-ink-tertiary hover:text-ink">
+            ×
+          </button>
+        </div>
+        <h3 className="text-lg font-medium text-ink">{theme.name}</h3>
+        <p className="text-sm leading-relaxed text-ink-subtle">{theme.summary || "Sin descripción todavía."}</p>
+        <p className="label-mono text-[10px] text-ink-tertiary">
+          {theme.size} señales
+          {theme.clusterCount > 1 ? ` · agrupa ${theme.clusterCount} temas` : ""}
+        </p>
+
+        {theme.members.length > 0 && (
+          <div className="mt-1 flex flex-col gap-1 border-t border-hairline pt-3">
+            <p className="label-mono text-[10px] text-ink-tertiary">Temas dentro de este macro-tema</p>
+            <ul className="flex flex-col">
+              {theme.members.map((member) => {
+                const expanded = expandedId === member.id;
+                return (
+                  <li key={member.id} className="border-b border-hairline last:border-b-0">
+                    <button
+                      type="button"
+                      onClick={() => setExpandedId(expanded ? null : member.id)}
+                      aria-expanded={expanded}
+                      className="flex w-full items-center gap-2 py-2 text-left text-sm text-ink hover:text-ink"
+                    >
+                      <span aria-hidden className="text-ink-tertiary">
+                        •
+                      </span>
+                      <span className="flex-1">{member.name}</span>
+                      <span className="label-mono text-[10px] text-ink-tertiary">{member.size}</span>
+                      <span
+                        aria-hidden
+                        className={`text-ink-tertiary transition-transform duration-150 ${expanded ? "rotate-180" : ""}`}
+                      >
+                        ⌄
+                      </span>
+                    </button>
+                    {expanded && (
+                      <p className="pb-2 pl-4 pr-2 text-xs leading-relaxed text-ink-subtle">
+                        {member.summary || "Sin descripción todavía."}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

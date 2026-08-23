@@ -172,6 +172,47 @@ export function HorizontesBoard({ payload, canEdit }: { payload: HorizontesPaylo
   );
 }
 
+type SortKey =
+  | "name"
+  | "horizon"
+  | "vitality"
+  | "velocity30d"
+  | "density"
+  | "connectivity"
+  | "novelty"
+  | "size"
+  | "date";
+
+type SortState = { key: SortKey; dir: "asc" | "desc" };
+
+const HORIZON_FILTERS = ["all", "H1", "H2", "H3", "none"] as const;
+type HorizonFilter = (typeof HORIZON_FILTERS)[number];
+
+function sortValue(c: HorizonteCluster, key: SortKey, alive: boolean): number | string {
+  switch (key) {
+    case "name":
+      return c.name.toLowerCase();
+    case "horizon":
+      return c.horizon ?? "";
+    case "vitality":
+      return c.vitality;
+    case "velocity30d":
+      return c.velocity30d;
+    case "density":
+      return c.density ?? -1;
+    case "connectivity":
+      return c.connectivity ?? -1;
+    case "novelty":
+      return c.novelty ?? -1;
+    case "size":
+      return c.size;
+    case "date": {
+      const d = alive ? c.firstSeenAt : c.diedAt;
+      return d ? new Date(d).getTime() : 0;
+    }
+  }
+}
+
 function ClusterTable({
   clusters,
   alive,
@@ -183,37 +224,123 @@ function ClusterTable({
   /** Solo admin: el select que fija el horizonte; member ve la etiqueta. */
   canEdit: boolean;
 }) {
+  const [query, setQuery] = useState("");
+  const [horizonFilter, setHorizonFilter] = useState<HorizonFilter>("all");
+  const [sort, setSort] = useState<SortState>({ key: "vitality", dir: "desc" });
+
+  function toggleSort(key: SortKey) {
+    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  }
+
+  const filtered = clusters.filter((c) => {
+    if (horizonFilter === "none" && c.horizon) return false;
+    if (horizonFilter !== "all" && horizonFilter !== "none" && c.horizon !== horizonFilter) return false;
+    if (query.trim()) {
+      const q = query.trim().toLowerCase();
+      if (!c.name.toLowerCase().includes(q) && !c.summary.toLowerCase().includes(q)) return false;
+    }
+    return true;
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const va = sortValue(a, sort.key, alive);
+    const vb = sortValue(b, sort.key, alive);
+    if (typeof va === "string" || typeof vb === "string") {
+      return String(va).localeCompare(String(vb)) * dir;
+    }
+    return (va - vb) * dir;
+  });
+
+  const filtering = query.trim() !== "" || horizonFilter !== "all";
+
   return (
-    <div className="overflow-x-auto rounded-xl border border-hairline">
-      <table className="w-full border-collapse text-sm">
-        <thead>
-          <tr className="label-mono border-b border-ink bg-surface-1 text-left text-ink-subtle">
-            <th className="px-3 py-2 font-medium">Tema</th>
-            <th className="px-3 py-2 font-medium">Horizonte</th>
-            <th className="px-3 py-2 text-right font-medium" title="Suma de la vitalidad de sus señales">
-              Vitalidad
-            </th>
-            <th className="px-3 py-2 font-medium" title="Vitalidad en las últimas corridas">
-              Tendencia
-            </th>
-            <th className="px-3 py-2 text-right font-medium" title="Señales likeadas en los últimos 30 días vs. los 30 anteriores">
-              Velocidad
-            </th>
-            <th className="px-3 py-2 text-right font-medium" title="Cohesión: qué tan cerca están sus señales del centro del tema">
-              Densidad
-            </th>
-            <th className="px-3 py-2 text-right font-medium" title="Proporción de enlaces que salen hacia otros temas · temas vecinos">
-              Conectividad
-            </th>
-            <th className="px-3 py-2 text-right font-medium" title="Distancia del tema al centro de todo el mapa">
-              Novedad
-            </th>
-            <th className="px-3 py-2 text-right font-medium">Señales</th>
-            <th className="px-3 py-2 font-medium">{alive ? "Desde" : "Murió"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {clusters.map((c) => (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Buscar tema…"
+          className="rounded-md border border-hairline bg-canvas px-2 py-1 text-sm text-ink outline-none focus:border-hairline-strong"
+        />
+        <div className="flex items-center gap-1">
+          {HORIZON_FILTERS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setHorizonFilter(key)}
+              className={`label-mono border px-2 py-1 text-[10px] transition-colors duration-150 ${
+                horizonFilter === key
+                  ? "border-ink bg-ink text-brand-white"
+                  : "border-hairline text-ink-subtle hover:border-ink"
+              }`}
+            >
+              {key === "all" ? "Todos" : key === "none" ? "Sin horizonte" : HORIZON_LABELS[key].short}
+            </button>
+          ))}
+        </div>
+        {filtering && (
+          <span className="text-xs text-ink-tertiary">
+            {sorted.length} de {clusters.length}
+          </span>
+        )}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-hairline">
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="label-mono border-b border-ink bg-surface-1 text-left text-ink-subtle">
+              <SortTh label="Tema" sortKey="name" sort={sort} onSort={toggleSort} />
+              <SortTh label="Horizonte" sortKey="horizon" sort={sort} onSort={toggleSort} />
+              <SortTh
+                label="Vitalidad"
+                sortKey="vitality"
+                sort={sort}
+                onSort={toggleSort}
+                align="right"
+                title="Suma de la vitalidad de sus señales"
+              />
+              <th className="px-3 py-2 font-medium" title="Vitalidad en las últimas corridas">
+                Tendencia
+              </th>
+              <SortTh
+                label="Velocidad"
+                sortKey="velocity30d"
+                sort={sort}
+                onSort={toggleSort}
+                align="right"
+                title="Señales likeadas en los últimos 30 días vs. los 30 anteriores"
+              />
+              <SortTh
+                label="Densidad"
+                sortKey="density"
+                sort={sort}
+                onSort={toggleSort}
+                align="right"
+                title="Cohesión: qué tan cerca están sus señales del centro del tema"
+              />
+              <SortTh
+                label="Conectividad"
+                sortKey="connectivity"
+                sort={sort}
+                onSort={toggleSort}
+                align="right"
+                title="Proporción de enlaces que salen hacia otros temas · temas vecinos"
+              />
+              <SortTh
+                label="Novedad"
+                sortKey="novelty"
+                sort={sort}
+                onSort={toggleSort}
+                align="right"
+                title="Distancia del tema al centro de todo el mapa"
+              />
+              <SortTh label="Señales" sortKey="size" sort={sort} onSort={toggleSort} align="right" />
+              <SortTh label={alive ? "Desde" : "Murió"} sortKey="date" sort={sort} onSort={toggleSort} />
+            </tr>
+          </thead>
+          <tbody>
+            {sorted.map((c) => (
             <tr key={c.id} className="border-b border-hairline align-top last:border-b-0">
               <td className="max-w-xs px-3 py-2 text-ink">
                 <p className="font-medium">
@@ -248,20 +375,57 @@ function ClusterTable({
               </td>
             </tr>
           ))}
-          {clusters.length === 0 && (
+          {sorted.length === 0 && (
             <tr>
               <td colSpan={10} className="px-3 py-8 text-center text-sm text-ink-subtle">
-                {!alive
-                  ? "Ningún tema ha muerto todavía."
-                  : canEdit
-                    ? "Todavía no hay temas. Corre el job del grafo desde Sistema (o el de embeddings en local)."
-                    : "Todavía no hay temas: el mapa se construye conforme se publican señales."}
+                {clusters.length > 0
+                  ? "Ningún tema coincide con el filtro."
+                  : !alive
+                    ? "Ningún tema ha muerto todavía."
+                    : canEdit
+                      ? "Todavía no hay temas. Corre el job del grafo desde Sistema (o el de embeddings en local)."
+                      : "Todavía no hay temas: el mapa se construye conforme se publican señales."}
               </td>
             </tr>
           )}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
+  );
+}
+
+function SortTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align,
+  title,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  onSort: (key: SortKey) => void;
+  align?: "right";
+  title?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th className={`px-3 py-2 font-medium ${align === "right" ? "text-right" : ""}`} title={title}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-1 transition-colors duration-150 hover:text-ink ${
+          align === "right" ? "flex-row-reverse" : ""
+        }`}
+      >
+        {label}
+        <span aria-hidden className={active ? "text-ink" : "text-ink-tertiary/40"}>
+          {active ? (sort.dir === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
   );
 }
 

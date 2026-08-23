@@ -1,7 +1,7 @@
 import { requireUserPage } from "@/lib/require-user";
 import { withOwner } from "@/lib/tenant-db";
 import { HorizontesBoard, type HorizonteCluster, type HorizontesPayload } from "@/components/HorizontesBoard";
-import { MacroHorizonBoard, type MacroTheme } from "@/components/MacroHorizonBoard";
+import { MacroHorizonBoard, type MacroTheme, type MacroThemeMember } from "@/components/MacroHorizonBoard";
 import { isHorizon, type HorizonKey } from "@/lib/horizons";
 
 export const dynamic = "force-dynamic";
@@ -82,25 +82,25 @@ export default async function HorizontesPage() {
     unembedded,
   };
 
-  // Macro-temas: agregado (señales, cuántos temas finos agrupa) por macro-tema,
-  // sumando los `SemanticCluster` vivos que lo referencian.
-  const macroAgg = new Map<string, { size: number; count: number }>();
+  // Macro-temas: agregado (señales, miembros) por macro-tema, sumando los
+  // `SemanticCluster` vivos que lo referencian.
+  const macroMembers = new Map<string, MacroThemeMember[]>();
   for (const c of clusters) {
     if (!c.macroClusterId) continue;
-    const agg = macroAgg.get(c.macroClusterId) ?? { size: 0, count: 0 };
-    agg.size += c.size;
-    agg.count += 1;
-    macroAgg.set(c.macroClusterId, agg);
+    const list = macroMembers.get(c.macroClusterId) ?? [];
+    list.push({ id: c.id, name: c.name, summary: c.summary, size: c.size });
+    macroMembers.set(c.macroClusterId, list);
   }
   const macroThemes: MacroTheme[] = macroClusters.filter((m) => isHorizon(m.horizon)).map((m) => {
-    const agg = macroAgg.get(m.id) ?? { size: 0, count: 0 };
+    const members = (macroMembers.get(m.id) ?? []).sort((a, b) => b.size - a.size);
     return {
       id: m.id,
       name: m.name,
       summary: m.summary,
       horizon: m.horizon as HorizonKey,
-      size: agg.size,
-      clusterCount: agg.count,
+      size: members.reduce((sum, mem) => sum + mem.size, 0),
+      clusterCount: members.length,
+      members,
     };
   });
 
