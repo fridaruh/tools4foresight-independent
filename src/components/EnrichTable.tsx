@@ -685,7 +685,7 @@ export function EnrichTable({
                 </th>
               )}
               <th className="min-w-64 px-3 py-2 font-medium">TL;DR</th>
-              <th className="min-w-72 px-3 py-2 font-medium">Item</th>
+              <th className="min-w-36 px-3 py-2 font-medium">Item</th>
               <th className="w-44 px-3 py-2 font-medium">Categoría</th>
               <th className="w-40 px-3 py-2 font-medium">PESTEL</th>
               <th className="w-48 px-3 py-2 font-medium">Etiquetas</th>
