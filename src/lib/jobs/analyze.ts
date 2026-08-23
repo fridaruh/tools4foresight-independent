@@ -21,9 +21,11 @@ import { withOwner } from "@/lib/tenant-db";
  * los ultimos 600 tweets, de los mas recientes a los mas antiguos"). Lo de atras no se
  * toca aunque este sin analizar.
  *
- * SUBIDA TEMPORAL A 1000 (2026-08-23): para que la carga masiva del CSV de fuentes
- * (884 señales) termine de analizarse hoy. Revertir a 600 en cuanto esa corrida
- * termine — ver el commit que sube este número para el que lo baja de vuelta.
+ * SUBIDA TEMPORAL A 1000 (2026-08-23): la carga masiva del CSV de fuentes (884
+ * señales) llegó a la cuota diaria con 116 sin analizar, y esas 116 NO caen
+ * dentro del top 600 por (likedAt, tweetId) — si se revierte antes de que
+ * terminen, se quedan huérfanas para siempre (el job nunca las vuelve a leer).
+ * Revertir a 600 recién cuando withTldr llegue a 884 para este tenant.
  */
 export const ANALYSIS_WINDOW = 1000;
 
