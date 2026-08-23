@@ -20,8 +20,12 @@ import { withOwner } from "@/lib/tenant-db";
  * Solo se analizan los N likes mas recientes (decision de Frida: "de momento solo corre
  * los ultimos 600 tweets, de los mas recientes a los mas antiguos"). Lo de atras no se
  * toca aunque este sin analizar.
+ *
+ * SUBIDA TEMPORAL A 1000 (2026-08-23): para que la carga masiva del CSV de fuentes
+ * (884 señales) termine de analizarse hoy. Revertir a 600 en cuanto esa corrida
+ * termine — ver el commit que sube este número para el que lo baja de vuelta.
  */
-export const ANALYSIS_WINDOW = 600;
+export const ANALYSIS_WINDOW = 1000;
 
 /** Items en vuelo al mismo tiempo, igual que en la categorizacion. */
 const CONCURRENCY = 4;
