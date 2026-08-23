@@ -47,6 +47,7 @@ model User {
   customFieldDefs       CustomFieldDefinition[]
   semanticLinks         SemanticLink[]
   semanticClusters      SemanticCluster[]
+  macroClusters         MacroCluster[]
   graphSnapshots        GraphSnapshot[]
   graphSnapshotClusters GraphSnapshotCluster[]
   graphSnapshotMembers  GraphSnapshotMember[]
@@ -437,6 +438,13 @@ model SemanticCluster {
   novelty         Float?
   bridgeClusters  Int    @default(0) @map("bridge_clusters")
 
+  // Macro-tema (segundo nivel): agrupa temas finos del mismo horizonte cuando hay
+  // demasiados para mostrarlos sueltos (PLAN Horizontes, 2026-08-23). Se recalcula
+  // entero en cada corrida del grafo — no tiene linaje propio, a diferencia de
+  // SemanticCluster.
+  macroClusterId String?      @map("macro_cluster_id")
+  macroCluster   MacroCluster? @relation(fields: [macroClusterId], references: [id], onDelete: SetNull)
+
   owner     User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   items     LikedItem[]
   snapshots GraphSnapshotCluster[]
@@ -445,7 +453,30 @@ model SemanticCluster {
 
   @@index([ownerId])
   @@index([ownerId, membersHash])
+  @@index([macroClusterId])
   @@map("semantic_clusters")
+}
+
+// Agrupa hasta 5 SemanticCluster VIVOS del mismo horizonte en un macro-tema, para
+// que /horizontes muestre como mucho 15 (3 horizontes × 5) en vez de los N temas
+// finos que arme el grafo. Se recalcula entero en cada corrida de refreshGraph
+// (delete + insert): no tiene linaje ni vitalidad propia, es una vista agregada.
+model MacroCluster {
+  id      String @id @default(uuid())
+  ownerId String @map("owner_id")
+  name    String
+  summary String
+  // H1 | H2 | H3 — todos sus SemanticCluster miembro comparten este horizonte;
+  // mezclar horizontes distintos en un macro-tema no tendría sentido para leerlo.
+  horizon String
+
+  owner    User             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  clusters SemanticCluster[]
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([ownerId])
+  @@map("macro_clusters")
 }
 
 // Una fila por corrida del grafo de un tenant (refreshGraph).

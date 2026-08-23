@@ -48,6 +48,56 @@ function extractTitleTag(html: string): string | null {
   return match?.[1] ? decodeHtmlEntities(match[1]).trim() : null;
 }
 
+/**
+ * Fecha de publicación del contenido, no de cuando lo detectamos: la mayoría de
+ * los sitios (sobre todo .gob.mx) no traen `article:published_time`, así que se
+ * intentan varias fuentes en orden de confianza antes de rendirse.
+ */
+function extractPublishedDate(html: string): Date | null {
+  const metaCandidates = [
+    "article:published_time",
+    "og:article:published_time",
+    "datePublished",
+    "date",
+    "publish-date",
+    "publishdate",
+    "pubdate",
+    "sailthru.date",
+    "parsely-pub-date",
+    "article.published",
+    "dc.date",
+    "dc.date.issued",
+    "og:updated_time",
+    "article:modified_time",
+  ];
+  for (const name of metaCandidates) {
+    const raw = extractMetaContent(html, name);
+    if (raw && !Number.isNaN(Date.parse(raw))) return new Date(raw);
+  }
+
+  // itemprop="datePublished" (Schema.org microdata inline, sin ir por JSON-LD).
+  const itemprop = html.match(
+    /<[^>]+itemprop=["']datePublished["'][^>]*content=["']([^"']*)["']/i,
+  );
+  if (itemprop?.[1] && !Number.isNaN(Date.parse(itemprop[1]))) return new Date(itemprop[1]);
+
+  // JSON-LD: "datePublished":"..." dentro de cualquier <script type="application/ld+json">.
+  const ldJsonBlocks = html.matchAll(
+    /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  );
+  for (const block of ldJsonBlocks) {
+    const match = block[1].match(/"datePublished"\s*:\s*"([^"]+)"/);
+    if (match?.[1] && !Number.isNaN(Date.parse(match[1]))) return new Date(match[1]);
+  }
+
+  // <time datetime="..."> como último recurso — a veces es la fecha del comentario
+  // más reciente y no la de publicación, por eso va al final.
+  const time = html.match(/<time[^>]+datetime=["']([^"']+)["']/i);
+  if (time?.[1] && !Number.isNaN(Date.parse(time[1]))) return new Date(time[1]);
+
+  return null;
+}
+
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -81,12 +131,11 @@ export async function fetchContentMetadata(url: string): Promise<FetchedContent>
   }
 
   const html = await res.text();
-  const publishedRaw = extractMetaContent(html, "article:published_time");
 
   return {
     title: extractMetaContent(html, "og:title") ?? extractTitleTag(html),
     description: extractMetaContent(html, "og:description") ?? extractMetaContent(html, "description"),
     imageUrl: extractMetaContent(html, "og:image"),
-    publishedAt: publishedRaw && !Number.isNaN(Date.parse(publishedRaw)) ? new Date(publishedRaw) : null,
+    publishedAt: extractPublishedDate(html),
   };
 }

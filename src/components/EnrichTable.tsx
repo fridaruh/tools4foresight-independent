@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { CATEGORY_NAMES } from "@/config/categories";
 import { authorLabel, isManualItem, type BoardItem } from "@/lib/board-item";
-import { formatDate, likedAtTooltip, truncate } from "@/lib/format";
+import { formatDate, formatLongDate, likedAtTooltip, truncate } from "@/lib/format";
 import { PestelSelect } from "@/components/PestelSelect";
 import { TagsInput } from "@/components/TagsInput";
 import { TweetModal } from "@/components/TweetModal";
@@ -154,6 +154,30 @@ function ProseCell({
         {error && <span className="text-[10px] text-danger">No se guardó</span>}
       </div>
     </div>
+  );
+}
+
+/**
+ * Fecha que se muestra en la fila: la de publicación del contenido
+ * (`contentPublishedAt`, extraída de la página) cuando se pudo recuperar, y solo
+ * si no, la de cuándo se detectó/agregó el enlace — que es una fecha del catálogo,
+ * no del contenido, y el tooltip lo aclara.
+ */
+function ItemDate({ item }: { item: BoardItem }) {
+  if (item.contentPublishedAt) {
+    return (
+      <span title={`Fecha de publicación del contenido: ${formatLongDate(item.contentPublishedAt)}.`}>
+        {formatDate(item.contentPublishedAt)}
+      </span>
+    );
+  }
+  return (
+    <span
+      title={`${likedAtTooltip(item.likedAt, item.likedAtSource)} No se pudo recuperar la fecha de publicación del contenido; esta es la fecha en que se agregó/detectó.`}
+    >
+      {isManualItem(item) ? "+ " : "♥ ~"}
+      {formatDate(item.likedAt)}
+    </span>
   );
 }
 
@@ -524,11 +548,7 @@ export function EnrichTable({
                     {item.contentTitle ?? truncate(item.tweetText, 120)}
                   </button>
                   <p className="mt-0.5 text-xs text-ink-tertiary">
-                    {authorLabel(item)} ·{" "}
-                    <span title={likedAtTooltip(item.likedAt, item.likedAtSource)}>
-                      {isManualItem(item) ? "+ " : "♥ ~"}
-                      {formatDate(item.likedAt)}
-                    </span>
+                    {authorLabel(item)} · <ItemDate item={item} />
                   </p>
                   {processing[id] && (
                     <p className="mt-1 text-xs text-ink-subtle">
@@ -739,11 +759,7 @@ export function EnrichTable({
                       {item.contentTitle ?? truncate(item.tweetText, 120)}
                     </button>
                     <p className="mt-0.5 text-xs text-ink-tertiary">
-                      {authorLabel(item)} ·{" "}
-                      <span title={likedAtTooltip(item.likedAt, item.likedAtSource)}>
-                        {isManualItem(item) ? "+ " : "♥ ~"}
-                        {formatDate(item.likedAt)}
-                      </span>
+                      {authorLabel(item)} · <ItemDate item={item} />
                     </p>
                     {processing[id] && (
                       <p className="mt-1 text-xs text-ink-subtle">

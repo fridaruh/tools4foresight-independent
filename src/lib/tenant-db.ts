@@ -146,6 +146,7 @@ export const TENANT_MODEL_FIELD = {
   category: "ownerId",
   semanticLink: "ownerId",
   semanticCluster: "ownerId",
+  macroCluster: "ownerId",
   graphSnapshot: "ownerId",
   graphSnapshotCluster: "ownerId",
   graphSnapshotMember: "ownerId",

@@ -31,10 +31,12 @@
 import {
   MIN_CLUSTER_SIZE,
   detectCommunities,
+  groupClusters,
   membersHash,
   nameCluster,
   type GraphEdge,
   type GraphNode,
+  type MacroInput,
 } from "@/lib/jobs/clusters";
 import type { HorizonKey } from "@/lib/horizons";
 import { budgetExceeded, type JobFn, type JobResult } from "@/lib/jobs/types";
@@ -58,6 +60,10 @@ const DEAD_THRESHOLD = 1.0;
 // Solapamiento minimo (Jaccard sobre ids) para decir "esta comunidad es el mismo
 // tema que aquel linaje". Por debajo, el tema viejo muere y nace uno nuevo.
 const LINEAGE_JACCARD = 0.3;
+// Tope de macro-temas por columna de horizonte en /horizontes (decisión de
+// Frida, 2026-08-23): 3 horizontes × 5 = 15 macro-temas como mucho, en vez de
+// mostrar sueltos los N temas finos que arme el grafo.
+const MAX_MACRO_PER_HORIZON = 5;
 
 /** Tope de las dos transacciones del job (ver cabecera). */
 const TX_TIMEOUT_MS = 120_000;
@@ -133,6 +139,7 @@ export type GraphSummary = {
   died: number;
   revived: number;
   orphans: number;
+  macroGroups: number;
   clusterErrors?: string[];
 };
 
@@ -298,9 +305,11 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
     async (tx) => {
       // 1. Materializar los temas (crear los nuevos, renombrar los que cambiaron).
       const resolved: ResolvedCluster[] = [];
+      const resolvedNames = new Map<string, { name: string; summary: string }>();
       for (const p of planned) {
         if (p.title === null && p.prev) {
           resolved.push({ clusterId: p.prev.id, members: p.members, hash: p.hash, existing: p.prev });
+          resolvedNames.set(p.prev.id, { name: p.prev.name, summary: p.prev.summary });
           continue;
         }
         if (p.prev) {
@@ -309,6 +318,7 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
             data: { name: p.title!.name, summary: p.title!.summary },
           });
           resolved.push({ clusterId: p.prev.id, members: p.members, hash: p.hash, existing: p.prev });
+          resolvedNames.set(p.prev.id, { name: p.title!.name, summary: p.title!.summary });
         } else {
           const created = await tx.semanticCluster.create({
             data: {
@@ -321,6 +331,7 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
             select: { id: true },
           });
           resolved.push({ clusterId: created.id, members: p.members, hash: p.hash, existing: null });
+          resolvedNames.set(created.id, { name: p.title!.name, summary: p.title!.summary });
         }
       }
 
@@ -361,6 +372,7 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
       let dead = 0;
       let revived = 0;
       let died = 0;
+      const clustersByHorizon = new Map<string, MacroInput[]>();
 
       for (const r of resolved) {
         const s = stats.find((x) => x.id === r.clusterId)!;
@@ -373,6 +385,13 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
         else dead += 1;
         if (prev && !wasAlive && isAlive) revived += 1;
         if (prev && wasAlive && !isAlive) died += 1;
+
+        if (isAlive && horizon) {
+          const bucket = clustersByHorizon.get(horizon) ?? [];
+          const named = resolvedNames.get(r.clusterId);
+          bucket.push({ id: r.clusterId, name: named?.name ?? "", summary: named?.summary ?? "", size: s.size });
+          clustersByHorizon.set(horizon, bucket);
+        }
 
         clusterUpdates.push({
           id: r.clusterId,
@@ -523,10 +542,22 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
         died,
         revived,
         orphans: orphanIds.length,
+        clustersByHorizon,
       };
     },
     { timeoutMs: TX_TIMEOUT_MS },
   );
+
+  // ── Fase D: macro-temas (fuera de tx — llamadas a Ollama) ─────────────────
+  const macroErrors: string[] = [];
+  let macroGroups = 0;
+  try {
+    macroGroups = await rebuildMacroClusters(ownerId, written.clustersByHorizon);
+  } catch (error) {
+    // Un macro-tema mal armado no invalida la corrida del grafo: /horizontes
+    // cae de vuelta a mostrar los temas finos sueltos hasta la próxima corrida.
+    macroErrors.push(error instanceof Error ? error.message : String(error));
+  }
 
   return {
     ok: errors.length === 0,
@@ -542,8 +573,54 @@ export async function refreshGraph(ownerId: string, trigger: GraphTrigger): Prom
     died: written.died,
     revived: written.revived,
     orphans: written.orphans,
-    ...(errors.length > 0 ? { clusterErrors: errors.slice(0, 3) } : {}),
+    macroGroups,
+    ...(errors.length > 0 || macroErrors.length > 0
+      ? { clusterErrors: [...errors, ...macroErrors].slice(0, 3) }
+      : {}),
   };
+}
+
+/**
+ * Reconstruye los macro-temas del tenant DESDE CERO en cada corrida: sin linaje
+ * propio, a diferencia de `SemanticCluster` (PLAN Horizontes, 2026-08-23). Por
+ * cada horizonte con más de `MAX_MACRO_PER_HORIZON` temas vivos, se agrupan con
+ * Ollama (`groupClusters`); con menos, cada tema fino es su propio macro-tema de
+ * 1 (sin llamar al modelo). Devuelve cuántos macro-temas quedaron.
+ *
+ * Borrar los `MacroCluster` viejos primero y crear los nuevos después dentro de
+ * la MISMA transacción evita un estado a medias — y el `onDelete: SetNull` del
+ * lado de `SemanticCluster.macroClusterId` limpia solo las referencias viejas.
+ */
+async function rebuildMacroClusters(
+  ownerId: string,
+  clustersByHorizon: Map<string, MacroInput[]>,
+): Promise<number> {
+  const groupsByHorizon = new Map<string, Awaited<ReturnType<typeof groupClusters>>>();
+  for (const [horizon, clusters] of clustersByHorizon) {
+    if (clusters.length === 0) continue;
+    groupsByHorizon.set(horizon, await groupClusters(clusters, MAX_MACRO_PER_HORIZON));
+  }
+
+  return withOwner(ownerId, async (tx) => {
+    await tx.macroCluster.deleteMany({ where: { ownerId } });
+
+    let total = 0;
+    for (const [horizon, groups] of groupsByHorizon) {
+      for (const group of groups) {
+        if (group.memberIds.length === 0) continue;
+        const created = await tx.macroCluster.create({
+          data: { ownerId, name: group.name, summary: group.summary, horizon },
+          select: { id: true },
+        });
+        await tx.semanticCluster.updateMany({
+          where: { id: { in: group.memberIds }, ownerId },
+          data: { macroClusterId: created.id },
+        });
+        total += 1;
+      }
+    }
+    return total;
+  });
 }
 
 /**

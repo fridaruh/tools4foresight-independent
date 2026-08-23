@@ -45,7 +45,7 @@ export type HorizontesPayload = {
   unembedded: number;
 };
 
-const HORIZON_COLORS: Record<HorizonKey, string> = {
+export const HORIZON_COLORS: Record<HorizonKey, string> = {
   H1: "#0a0a0a",
   H2: "#2456d9",
   H3: "#ff4d00",

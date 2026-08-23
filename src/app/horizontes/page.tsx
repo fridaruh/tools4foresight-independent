@@ -1,6 +1,8 @@
 import { requireUserPage } from "@/lib/require-user";
 import { withOwner } from "@/lib/tenant-db";
 import { HorizontesBoard, type HorizonteCluster, type HorizontesPayload } from "@/components/HorizontesBoard";
+import { MacroHorizonBoard, type MacroTheme } from "@/components/MacroHorizonBoard";
+import { isHorizon, type HorizonKey } from "@/lib/horizons";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,7 @@ export default async function HorizontesPage() {
   const { userId } = await requireUserPage();
   const since = historySince();
 
-  const [clusters, snapshots, history, orphans, unembedded] = await withOwner(userId, async (tx) => {
+  const [clusters, macroClusters, snapshots, history, orphans, unembedded] = await withOwner(userId, async (tx) => {
     return Promise.all([
       tx.semanticCluster.findMany({
         orderBy: [{ vitality: "desc" }, { name: "asc" }],
@@ -36,7 +38,11 @@ export default async function HorizontesPage() {
           lastSignalAt: true,
           diedAt: true,
           revivedCount: true,
+          macroClusterId: true,
         },
+      }),
+      tx.macroCluster.findMany({
+        select: { id: true, name: true, summary: true, horizon: true },
       }),
       tx.graphSnapshot.findMany({
         orderBy: { takenAt: "desc" },
@@ -63,7 +69,7 @@ export default async function HorizontesPage() {
 
   const payload: HorizontesPayload = {
     clusters: clusters.map(
-      (c): HorizonteCluster => ({
+      ({ macroClusterId: _macroClusterId, ...c }): HorizonteCluster => ({
         ...c,
         firstSeenAt: c.firstSeenAt.toISOString(),
         lastSignalAt: c.lastSignalAt?.toISOString() ?? null,
@@ -76,11 +82,34 @@ export default async function HorizontesPage() {
     unembedded,
   };
 
+  // Macro-temas: agregado (señales, cuántos temas finos agrupa) por macro-tema,
+  // sumando los `SemanticCluster` vivos que lo referencian.
+  const macroAgg = new Map<string, { size: number; count: number }>();
+  for (const c of clusters) {
+    if (!c.macroClusterId) continue;
+    const agg = macroAgg.get(c.macroClusterId) ?? { size: 0, count: 0 };
+    agg.size += c.size;
+    agg.count += 1;
+    macroAgg.set(c.macroClusterId, agg);
+  }
+  const macroThemes: MacroTheme[] = macroClusters.filter((m) => isHorizon(m.horizon)).map((m) => {
+    const agg = macroAgg.get(m.id) ?? { size: 0, count: 0 };
+    return {
+      id: m.id,
+      name: m.name,
+      summary: m.summary,
+      horizon: m.horizon as HorizonKey,
+      size: agg.size,
+      clusterCount: agg.count,
+    };
+  });
+
   return (
     <div
       data-section="horizontes"
       className="mx-auto flex w-full max-w-[90rem] flex-1 flex-col gap-8 px-4 py-8 sm:px-6 lg:px-10"
     >
+      <MacroHorizonBoard themes={macroThemes} />
       <HorizontesBoard payload={payload} canEdit={true} />
     </div>
   );
