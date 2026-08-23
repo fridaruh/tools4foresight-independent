@@ -77,6 +77,7 @@ export default async function EnrichPage({
     category: item.category,
     categorySource: item.categorySource,
     pestel: item.pestel,
+    tags: item.tags,
     tldr: item.tldr,
     whyMatters: item.whyMatters,
     impact: item.impact,

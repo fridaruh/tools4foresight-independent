@@ -5,6 +5,7 @@ import { CATEGORY_NAMES } from "@/config/categories";
 import { authorLabel, isManualItem, type BoardItem } from "@/lib/board-item";
 import { formatDate, likedAtTooltip, truncate } from "@/lib/format";
 import { PestelSelect } from "@/components/PestelSelect";
+import { TagsInput } from "@/components/TagsInput";
 import { TweetModal } from "@/components/TweetModal";
 import { isPublishable, type PublishStatus } from "@/lib/publish";
 
@@ -13,6 +14,7 @@ export type EnrichRow = {
   category: string | null;
   categorySource: string;
   pestel: string[];
+  tags: string[];
   tldr: string | null;
   whyMatters: string | null;
   impact: string | null;
@@ -31,6 +33,7 @@ const PUBLISH_LABEL: Record<PublishStatus, string> = {
 type Draft = {
   category: string;
   pestel: string[];
+  tags: string[];
   customFields: Record<string, string>;
 };
 
@@ -38,6 +41,7 @@ function toDraft(row: EnrichRow): Draft {
   return {
     category: row.category ?? "",
     pestel: [...row.pestel],
+    tags: [...row.tags],
     customFields: { ...row.customFields },
   };
 }
@@ -49,6 +53,7 @@ function sameSet(a: string[], b: string[]): boolean {
 function isDirty(row: EnrichRow, draft: Draft): boolean {
   if (draft.category !== (row.category ?? "")) return true;
   if (!sameSet(draft.pestel, row.pestel)) return true;
+  if (!sameSet(draft.tags, row.tags)) return true;
   const keys = new Set([...Object.keys(row.customFields), ...Object.keys(draft.customFields)]);
   for (const key of keys) {
     if ((draft.customFields[key] ?? "") !== (row.customFields[key] ?? "")) return true;
@@ -159,6 +164,7 @@ function blankRow(item: BoardItem): EnrichRow {
     category: item.category,
     categorySource: item.categorySource,
     pestel: [],
+    tags: [],
     tldr: null,
     whyMatters: null,
     impact: null,
@@ -234,6 +240,7 @@ export function EnrichTable({
       const ok = await patchRow(id, {
         category: draft.category || null,
         pestel: draft.pestel,
+        tags: draft.tags,
         customFields: draft.customFields,
       });
       if (!ok) throw new Error("save failed");
@@ -245,6 +252,7 @@ export function EnrichTable({
           category: draft.category || null,
           categorySource: "manual",
           pestel: [...draft.pestel],
+          tags: [...draft.tags],
           customFields: { ...draft.customFields },
         },
       }));
@@ -531,7 +539,7 @@ export function EnrichTable({
               </div>
 
               <div className="flex flex-col gap-3 px-3 py-3">
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   <div>
                     <p className="label-mono mb-1 text-[10px] text-ink-tertiary">Categoría</p>
                     <select
@@ -556,6 +564,10 @@ export function EnrichTable({
                       selected={draft.pestel}
                       onChange={(pestel) => edit(id, { pestel })}
                     />
+                  </div>
+                  <div>
+                    <p className="label-mono mb-1 text-[10px] text-ink-tertiary">Etiquetas</p>
+                    <TagsInput value={draft.tags} onChange={(tags) => edit(id, { tags })} />
                   </div>
                 </div>
 
@@ -676,6 +688,7 @@ export function EnrichTable({
               <th className="min-w-72 px-3 py-2 font-medium">Item</th>
               <th className="w-44 px-3 py-2 font-medium">Categoría</th>
               <th className="w-40 px-3 py-2 font-medium">PESTEL</th>
+              <th className="w-48 px-3 py-2 font-medium">Etiquetas</th>
               <th className="min-w-64 px-3 py-2 font-medium">¿Por qué importa?</th>
               <th className="min-w-64 px-3 py-2 font-medium">Impacto</th>
               {fields.map((field) => (
@@ -762,6 +775,10 @@ export function EnrichTable({
                       selected={draft.pestel}
                       onChange={(pestel) => edit(id, { pestel })}
                     />
+                  </td>
+
+                  <td className="px-3 py-2">
+                    <TagsInput value={draft.tags} onChange={(tags) => edit(id, { tags })} />
                   </td>
 
                   <td className="px-3 py-2">

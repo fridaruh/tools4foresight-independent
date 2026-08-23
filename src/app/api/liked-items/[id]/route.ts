@@ -7,6 +7,7 @@ import { withOwner } from "@/lib/tenant-db";
 type Body = {
   category?: string | null;
   pestel?: string[];
+  tags?: string[];
   tldr?: string | null;
   impact?: string | null;
   whyMatters?: string | null;
@@ -50,6 +51,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     data.categoryReasoning = null;
   }
   if ("pestel" in body) data.pestel = normalizePestel(body.pestel);
+  if ("tags" in body) {
+    data.tags = normalizeTags(body.tags);
+    // Igual que category/pestel: editar a mano congela el valor para que el
+    // job de etiquetas (Ollama, solo señales publicadas) no lo vuelva a pisar.
+    data.tagsSource = "manual";
+  }
 
   // Igual que con la categoria: tocar el texto lo marca como manual para que el job
   // de analisis no lo vuelva a pisar en la siguiente corrida.
@@ -192,4 +199,19 @@ export async function DELETE(
 
   if (deleted === 0) return NextResponse.json({ error: "No encontrado" }, { status: 404 });
   return NextResponse.json({ ok: true });
+}
+
+/** Trim, minúsculas, sin "#" y sin duplicados — mismo criterio que TagsInput. */
+function normalizeTags(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const value of raw) {
+    if (typeof value !== "string") continue;
+    const tag = value.trim().toLowerCase().replace(/^#/, "");
+    if (!tag || seen.has(tag)) continue;
+    seen.add(tag);
+    tags.push(tag);
+  }
+  return tags;
 }
