@@ -30,9 +30,13 @@ caché y log. Ver [`.env.example`](../.env.example).
 
 ## 1. Desplegar
 
+Este servidor vive en `mcp-server/` dentro del repo de tools4foresight, pero es
+un **proyecto de Vercel aparte** del de la app: se despliega con este directorio
+como raíz, no con la raíz del repo.
+
 ```bash
-cd MCP_T4F_Multitenant
-vercel link
+cd mcp-server
+vercel link          # proyecto NUEVO, distinto del de la app
 
 # La ÚNICA obligatoria. Debe terminar en /api/public/v1 y ser https.
 vercel env add T4F_API_BASE_URL production
@@ -40,7 +44,14 @@ vercel env add T4F_API_BASE_URL production
 #   https://individual.tools4foresight.com/api/public/v1
 
 vercel deploy --prod
+vercel domains add mcp.individual.tools4foresight.com
 ```
+
+Sobre el nombre: `mcp.tools4foresight.com` **ya está tomado** por el servidor de
+la otra herramienta, la que sirve un acervo único. Esta es la instancia donde
+cada persona tiene su propio banco, así que su MCP cuelga de su propia app —
+`individual.tools4foresight.com` → `mcp.individual.tools4foresight.com`. Son dos
+servidores distintos y las claves no son intercambiables.
 
 `vercel.json` fija `maxDuration: 60` para `api/mcp.ts` y desactiva la detección
 de framework (`framework: null` + un `buildCommand` que no hace nada): sin eso,
@@ -71,7 +82,7 @@ porque no hay claves compartidas.
   "mcpServers": {
     "tools4foresight": {
       "type": "http",
-      "url": "https://tu-despliegue.vercel.app/api/mcp",
+      "url": "https://mcp.individual.tools4foresight.com/api/mcp",
       "headers": { "Authorization": "Bearer t4f_tu-api-key-personal" }
     }
   }
@@ -82,7 +93,7 @@ En Claude Code:
 
 ```bash
 claude mcp add --transport http tools4foresight \
-  https://tu-despliegue.vercel.app/api/mcp \
+  https://mcp.individual.tools4foresight.com/api/mcp \
   --header "Authorization: Bearer t4f_tu-api-key-personal"
 ```
 
@@ -91,7 +102,7 @@ claude mcp add --transport http tools4foresight \
 **Sin cabecera debe dar 401**, con un mensaje que diga qué poner:
 
 ```bash
-curl -s -X POST https://tu-despliegue.vercel.app/api/mcp | jq .
+curl -s -X POST https://mcp.individual.tools4foresight.com/api/mcp | jq .
 # {"error":{"code":"unauthorized","message":"Falta la cabecera Authorization: Bearer …"}}
 ```
 
@@ -102,7 +113,7 @@ dentro de la respuesta MCP, no como un 401 HTTP.
 **Con tu clave real**, un `initialize` del protocolo debe responder:
 
 ```bash
-curl -s -X POST https://tu-despliegue.vercel.app/api/mcp \
+curl -s -X POST https://mcp.individual.tools4foresight.com/api/mcp \
   -H "Authorization: Bearer $T4F_API_KEY" \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
@@ -121,7 +132,7 @@ Y con el Inspector, que es la forma cómoda de ver las 18 tools:
 ```bash
 npx @modelcontextprotocol/inspector
 # transporte: Streamable HTTP
-# URL: https://tu-despliegue.vercel.app/api/mcp
+# URL: https://mcp.individual.tools4foresight.com/api/mcp
 # header: Authorization: Bearer <tu API key de tools4foresight>
 ```
 
