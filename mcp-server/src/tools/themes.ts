@@ -107,7 +107,11 @@ export function registerThemeTools(server: McpServer, ctx: ToolContext): void {
         'La serie temporal de un tema a través de las corridas del grafo: cómo cambiaron su tamaño, ' +
         'vitalidad, velocidad y horizonte con el tiempo. **Es la tool para responder "¿esto está creciendo ' +
         'o apagándose?"** — no lo infieras de un solo `get_theme`, pide la historia. Los puntos vienen en ' +
-        'orden ascendente por fecha, tal como los da el servidor: no los reordenes.',
+        'orden ascendente por fecha, tal como los da el servidor: no los reordenes. ' +
+        '**El nombre de cada punto es el que el tema tenía en esa corrida**, no el de hoy: se regenera cada ' +
+        'vez que cambia su membresía, así que la serie puede pasar por varios nombres. Si el nombre del ' +
+        'histórico no coincide con el de `get_theme`, NO te equivocaste de id — el id es lo estable. La ' +
+        'respuesta trae los dos juntos para que se vea.',
       inputSchema: {
         theme_id: z.string().describe('El id del tema.'),
         from: z.string().optional().describe('Desde esta fecha (YYYY-MM-DD o ISO), sobre la fecha de la corrida.'),
@@ -117,8 +121,28 @@ export function registerThemeTools(server: McpServer, ctx: ToolContext): void {
       annotations: READ_ONLY,
     },
     guarded(async ({ theme_id, from, to, limit }) => {
-      const response = await ctx.client.getThemeHistory(theme_id, compact({ from, to, limit }));
-      return toolResult(formatThemeHistory(response.data), { data: response.data });
+      // Dos llamadas para una tool, a propósito: `/themes/{id}/history` NO trae
+      // el nombre vigente del tema, solo el que tenía en cada corrida. Sin el
+      // nombre actual al lado, la respuesta invita a la conclusión equivocada
+      // ("este id es otro tema"), que es justo el fallo que se está corrigiendo.
+      //
+      // El coste está acotado: `/themes/{id}` va por la caché de temas del
+      // cliente (TTL 5 min), así que en la secuencia habitual —`get_theme` y
+      // luego su historia— no cuesta ni un viaje extra.
+      //
+      // Y es BEST-EFFORT: si la ficha falla mientras la historia sí llegó, se
+      // renderiza sin nombre actual (el encabezado cae al id) en vez de tumbar
+      // una respuesta que ya tenemos. El 404 real —id inexistente o de otro
+      // banco— lo levanta igualmente la llamada a la historia.
+      const [history, current] = await Promise.all([
+        ctx.client.getThemeHistory(theme_id, compact({ from, to, limit })),
+        ctx.client.getTheme(theme_id).catch(() => null),
+      ]);
+      const currentName = current?.data.name;
+      return toolResult(formatThemeHistory(history.data, currentName), {
+        data: history.data,
+        ...(currentName !== undefined ? { currentName } : {}),
+      });
     }),
   );
 

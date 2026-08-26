@@ -11,6 +11,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { READ_ONLY, guarded, toolResult, type ToolContext } from "./context.js";
 import { formatCategories, formatDateTime, formatEstimatedDate, formatPestel } from "../format/shared.js";
+import { formatSignalCounts } from "../format/meta.js";
 import type { MetaDTO } from "../client/types.js";
 
 /**
@@ -19,16 +20,20 @@ import type { MetaDTO } from "../client/types.js";
  * "N resultados · generado <fecha>" que cierra un listado paginado), no el
  * `MetaDTO` de `/meta` (conteos, rango de fechas, última corrida, constantes
  * del modelo) que necesita esta tool — son dos tipos distintos con el mismo
- * nombre de función por coincidencia. Como no se puede tocar `src/format/**`,
- * se compone el markdown aquí mismo con los helpers de fecha que `shared.ts`
- * ya exporta, en vez de forzar una función que no encaja.
+ * nombre de función por coincidencia.
+ *
+ * La forma concreta del markdown se compone aquí, porque solo la usa esta tool.
+ * Los DOS CONTEOS DE SEÑALES, en cambio, salen de `format/meta.ts`: son la pieza
+ * que este resumen comparte con el resource `foresight://overview` y la que ya
+ * se rompió una vez en los dos sitios a la vez (rotulaban `publishedSignals`
+ * como "Señales" y se comían el total del banco).
  */
 function renderCorpusOverview(meta: MetaDTO): string {
   const { counts, domain, dateRange } = meta;
   const lines = [
     "## Resumen de tu banco de señales",
     "",
-    `- **Señales**: ${counts.publishedSignals}`,
+    ...formatSignalCounts(counts),
     `- **Temas vivos**: ${counts.themesAlive}`,
     `- **Temas fósiles**: ${counts.themesDead}`,
     `- **Macro-temas**: ${counts.macroThemes}`,
@@ -51,7 +56,9 @@ function renderCorpusOverview(meta: MetaDTO): string {
     "**Constantes del modelo**",
     `- Vida media de la vitalidad: ${domain.halfLifeDays} días`,
     `- Vida media de señales huérfanas: ${domain.orphanHalfLifeDays} días`,
-    `- Umbral de muerte de un tema (vitalidad suma): < ${domain.deadThreshold}`,
+    // No es la única vía a fósil: un tema también muere si su linaje no empareja
+    // en una corrida, con la vitalidad que sea (ver glossary.ts:fosil).
+    `- Umbral de muerte de un tema (vitalidad suma): < ${domain.deadThreshold} — pero un tema también pasa a fósil si su linaje no empareja en una corrida, tenga la vitalidad que tenga (\`explain_foresight_term\` con \`fosil\`)`,
     `- Umbral de arista del grafo (coseno): > ${domain.linkThreshold}`,
     `- Tamaño mínimo para ser tema: ${domain.minThemeSize} señales`,
     `- Máximo de macro-temas por horizonte: ${domain.maxMacroPerHorizon}`,
@@ -108,8 +115,11 @@ export function registerTaxonomyTools(server: McpServer, ctx: ToolContext): void
     {
       title: "Resumen de tu banco",
       description:
-        "LLAMA A ESTA TOOL PRIMERO si no sabes el tamaño ni la actualidad del corpus. Devuelve conteos " +
-        "(señales, temas vivos/fósiles, macro-temas, aristas, categorías, snapshots), el rango de fechas " +
+        "LLAMA A ESTA TOOL PRIMERO si no sabes el tamaño ni la actualidad del corpus. Devuelve DOS conteos " +
+        "de señales que no significan lo mismo: `signals` es el banco completo (el tamaño real del corpus) y " +
+        "`publishedSignals` es el subconjunto ya curado, que es el ÚNICO que entra al grafo, a los temas y a " +
+        "los horizontes. Usa `signals` para hablar de cuánto hay y `publishedSignals` como denominador de " +
+        "cualquier cifra del mapa. Además: temas vivos/fósiles, macro-temas, aristas, categorías, snapshots, el rango de fechas " +
         "cubierto, cuándo corrió el grafo por última vez y las constantes reales del modelo (vida media de " +
         "30 días, umbral de muerte 1.0, umbral de arista 0.55, entre otras) — así no las inventas ni las das " +
         "por hecho.",

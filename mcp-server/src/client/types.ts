@@ -301,10 +301,22 @@ export type MetaDTO = {
   generatedAt: string;
   counts: {
     /**
-     * PENDIENTE DE CONFIRMAR: el nombre viene del contrato v1 single-tenant,
-     * donde solo existían señales publicadas. En multi-tenant no hay filtro por
-     * `publishStatus`, así que este conteo debería ser el TOTAL del banco. Si la
-     * API acaba renombrándolo (`signals`), se cambia aquí y en `docs/API.md`.
+     * TOTAL de señales del banco, sin filtrar por `publishStatus`. Es el tamaño
+     * real del corpus: lo que la persona guardó, haya pasado o no por su
+     * curación.
+     */
+    signals: number;
+    /**
+     * Subconjunto de `signals` con `publishStatus: 'published'`. CONFIRMADO
+     * contra el handler real (`/api/public/v1/meta`): los dos conteos viajan y
+     * significan cosas distintas.
+     *
+     * La diferencia no es cosmética: el grafo, los temas, las aristas y los
+     * horizontes se calculan SOLO sobre lo publicado, así que `publishedSignals`
+     * es el denominador de todo lo demás en este DTO, mientras que `signals` y
+     * `dateRange` describen el banco entero. Presentar uno solo —como hacía
+     * `get_corpus_overview` antes— le da al agente un tamaño de corpus falso y
+     * lo deja topándose con señales que "no existían".
      */
     publishedSignals: number;
     themesAlive: number;

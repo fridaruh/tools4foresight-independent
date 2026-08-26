@@ -589,7 +589,7 @@ señales concretas en un informe.
 
 La serie temporal de un tema a través de las corridas del grafo.
 
-> La serie temporal de un tema a través de las corridas del grafo: cómo cambiaron su tamaño, vitalidad, velocidad y horizonte con el tiempo. **Es la tool para responder "¿esto está creciendo o apagándose?"** — no lo infieras de un solo `get_theme`, pide la historia. Los puntos vienen en orden ascendente por fecha, tal como los da el servidor: no los reordenes.
+> La serie temporal de un tema a través de las corridas del grafo: cómo cambiaron su tamaño, vitalidad, velocidad y horizonte con el tiempo. **Es la tool para responder "¿esto está creciendo o apagándose?"** — no lo infieras de un solo `get_theme`, pide la historia. Los puntos vienen en orden ascendente por fecha, tal como los da el servidor: no los reordenes. **El nombre de cada punto es el que el tema tenía en esa corrida**, no el de hoy: se regenera cada vez que cambia su membresía, así que la serie puede pasar por varios nombres. Si el nombre del histórico no coincide con el de `get_theme`, NO te equivocaste de id — el id es lo estable. La respuesta trae los dos juntos para que se vea.
 
 **Parámetros**
 
@@ -609,11 +609,15 @@ La serie temporal de un tema a través de las corridas del grafo.
 **Ejemplo de salida** — `content`:
 
 ```markdown
-## Historia de "Responsabilidad legal de los agentes autónomos"
+## Historia de "Responsabilidad legal de los agentes autónomos" (nombre actual)
 
-- 21 ago 2026, 06:00 UTC (cron): tamaño 12, vivo, 3.61 (viva), velocidad 4, H2 · en transición
-- 23 ago 2026, 18:41 UTC (publish): tamaño 13, vivo, 3.95 (viva), velocidad 5, H2 · en transición
-- 25 ago 2026, 06:00 UTC (cron): tamaño 14, vivo, 4.12 (viva), velocidad 6, H2 · en transición
+- **id**: `4e9b1c72-8a30-4f11-b8d6-2c5a7e0d91f4` — es lo único estable de un tema: persiste aunque cambie de nombre, muera y resucite.
+
+_El nombre que aparece en cada punto es el que el tema tenía EN ESA CORRIDA. Se regenera cada vez que cambia su membresía, así que ver nombres distintos a lo largo de la serie es lo normal y NO significa que sean temas distintos ni que te hayas equivocado de id._
+
+- 21 ago 2026, 06:00 UTC (cron) — se llamaba «Quién responde por un agente autónomo»: tamaño 12, vivo, 3.61 (viva), velocidad 4, H2 · en transición
+- 23 ago 2026, 18:41 UTC (publish) — se llamaba «Responsabilidad legal de los agentes autónomos»: tamaño 13, vivo, 3.95 (viva), velocidad 5, H2 · en transición
+- 25 ago 2026, 06:00 UTC (cron) — se llamaba «Responsabilidad legal de los agentes autónomos»: tamaño 14, vivo, 4.12 (viva), velocidad 6, H2 · en transición
 ```
 
 **Extracto de `structuredContent`**
@@ -634,6 +638,15 @@ La serie temporal de un tema a través de las corridas del grafo.
 apagándose?". `get_theme` da un punto; `get_theme_history` da la serie completa
 para trazar la trayectoria — no hay atajo válido comparando dos `get_theme` en
 momentos distintos, porque no arma la serie intermedia.
+
+> **Por qué esta tool hace dos llamadas.** `/themes/{id}/history` devuelve el
+> nombre que el tema tenía en cada corrida (el job de grafo lo rebautiza cada vez
+> que cambia la membresía, y el snapshot lo congela), pero no el vigente. Sin el
+> nombre actual al lado, ver dos nombres distintos para el mismo id lleva a la
+> conclusión razonable y equivocada de "me equivoqué de id". Así que la tool pide
+> además `/themes/{id}` —best-effort: si falla, el encabezado cae al id— y ese
+> nombre viaja también en `structuredContent.currentName`. La caché de temas
+> (TTL 5 min) hace que en la secuencia habitual no cueste un viaje extra.
 
 ---
 
@@ -945,7 +958,8 @@ modelo.
 ```markdown
 ## Resumen de tu banco de señales
 
-- **Señales**: 452
+- **Señales en tu banco (total)**: 1483 — todo lo que has guardado, lo hayas revisado o no.
+- **Señales publicadas**: 452 — las que ya curaste. Son las únicas que entran al grafo, a los temas y a los horizontes, así que todo lo que sigue se calcula sobre estas 452, no sobre las 1483. Las otras 1031 están `pending`: siguen siendo tuyas y `list_signals` las devuelve, solo que todavía no forman parte del mapa.
 - **Temas vivos**: 27
 - **Temas fósiles**: 41
 - **Macro-temas**: 9
@@ -959,7 +973,7 @@ modelo.
 **Constantes del modelo**
 - Vida media de la vitalidad: 30 días
 - Vida media de señales huérfanas: 15 días (mitad de la vida media normal)
-- Umbral de muerte de un tema (vitalidad suma): < 1
+- Umbral de muerte de un tema (vitalidad suma): < 1 — pero un tema también pasa a fósil si su linaje no empareja en una corrida, tenga la vitalidad que tenga (`explain_foresight_term` con `fosil`)
 - Umbral de arista del grafo (coseno): > 0.55
 - Tamaño mínimo para ser tema: 3 señales
 - Máximo de macro-temas por horizonte: 5
@@ -972,7 +986,7 @@ _generado 25 ago 2026, 14:38 UTC_
 ```json
 {
   "data": {
-    "counts": { "publishedSignals": 452, "themesAlive": 27, "themesDead": 41, "macroThemes": 9, "links": 6294, "categories": 4, "snapshots": 214 },
+    "counts": { "signals": 1483, "publishedSignals": 452, "themesAlive": 27, "themesDead": 41, "macroThemes": 9, "links": 6294, "categories": 4, "snapshots": 214 },
     "lastGraphRunAt": "2026-08-25T06:00:11.402Z",
     "domain": { "halfLifeDays": 30, "orphanHalfLifeDays": 15, "deadThreshold": 1, "linkThreshold": 0.55, "minThemeSize": 3, "maxMacroPerHorizon": 5 }
   }
@@ -984,12 +998,22 @@ ciegas sobre tamaño o actualidad del corpus, ni inventar constantes del modelo.
 sustituye a `explain_foresight_term` cuando la duda es conceptual en vez de
 numérica.
 
+> **Los dos conteos de señales no son lo mismo y salen siempre los dos.**
+> `counts.signals` es el banco entero —el tamaño real del corpus— y
+> `counts.publishedSignals` el subconjunto ya curado, que es el único que entra
+> al grafo, a los temas y a los horizontes. Enseñar solo el segundo rotulado
+> "Señales" (como se hacía antes) le da un tamaño de corpus falso a un modelo al
+> que las `instructions` del servidor mandan empezar justo por aquí, y que
+> después se topa con señales que creía inexistentes.
+
 > **Nota de implementación**: esta tool NO reutiliza `formatMeta` de
 > `src/format/shared.ts` — ese `formatMeta` formatea el **envelope** `ApiMeta`
 > (el pie "N resultados · generado…" de un listado paginado), no el `MetaDTO`
-> de `/meta` que necesita esta tool. El markdown se compone directamente en
+> de `/meta` que necesita esta tool. La forma del markdown se compone en
 > `src/tools/taxonomy.ts` (función `renderCorpusOverview`) con los helpers de
-> fecha que `shared.ts` sí exporta.
+> fecha que `shared.ts` sí exporta; las dos líneas de conteo vienen de
+> `src/format/meta.ts`, compartidas con el resource `foresight://overview`
+> porque son la pieza que se rompió en las dos vistas a la vez.
 
 ---
 

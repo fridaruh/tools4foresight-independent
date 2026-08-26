@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolContext } from "../tools/context.js";
 import type { HorizonKey, MetaDTO } from "../client/types.js";
+import { formatSignalCounts } from "../format/meta.js";
 import { renderGlossaryMarkdown } from "../domain/glossary.js";
 import { formatDateTime, formatEstimatedDate } from "../format/shared.js";
 import { formatSignalDetail, formatSignalList } from "../format/signal.js";
@@ -71,10 +72,12 @@ function firstValue(value: string | string[]): string {
 const HORIZON_KEYS: readonly HorizonKey[] = ["H1", "H2", "H3"];
 
 /**
- * `/meta` no tiene formateador en `src/format/` (esa capa formatea `ApiMeta`,
- * el sobre de paginación, no `MetaDTO`, el resumen del banco) — se renderiza
- * aquí porque es el único consumidor de esta forma exacta. Reusa los helpers
- * de fecha de `format/shared.ts` para no reinventar `~18 ago 2026`.
+ * Esta forma del resumen (encabezado `#`, vivos y fósiles en una línea) solo la
+ * usa este resource, así que se compone aquí. Lo que NO se compone aquí son los
+ * dos conteos de señales: vienen de `format/meta.ts`, compartidos con
+ * `get_corpus_overview`, porque es justo la pieza que se rompió en las dos
+ * vistas a la vez cuando estaba duplicada. Las fechas salen de
+ * `format/shared.ts` para no reinventar `~18 ago 2026`.
  */
 function renderOverview(meta: MetaDTO): string {
   const { counts, domain } = meta;
@@ -87,7 +90,7 @@ function renderOverview(meta: MetaDTO): string {
   return [
     "# Resumen de tu banco de señales",
     "",
-    `- **Señales**: ${counts.publishedSignals}`,
+    ...formatSignalCounts(counts),
     `- **Temas vivos**: ${counts.themesAlive} · **Fósiles**: ${counts.themesDead}`,
     `- **Macro-temas**: ${counts.macroThemes}`,
     `- **Aristas del grafo**: ${counts.links}`,

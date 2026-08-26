@@ -41,14 +41,15 @@ Cada señal lleva:
 - **Membresía**: pertenencia a un **tema** (si se detectó) o condición de huérfana.
 - **Vitalidad**: número que decae con el tiempo; se reanima si vecinas recientes la empujan.
 
-No se borran nunca. Se publican o despublican; si se despubblica, desaparece del grafo en la siguiente corrida.`,
-    formula: "Un item de \`liked_items\` con \`publishStatus = 'published'\`.",
+No se borran nunca. Se publican o despublican; si se despublica, desaparece del grafo en la siguiente corrida.`,
+    formula:
+      "Señal = cualquier item guardado en tu banco. \`publishStatus = 'published'\` marca el subconjunto ya curado, que es el único que entra al grafo, a los temas y a los horizontes.",
     constants: [
       {
         name: "Máximo PESTEL por señal",
         value: "2",
         source:
-          "Regla de análisis (src/lib/analysis-prompts.ts): cada señal lleva máximo 2 dimensiones.",
+          "Regla del prompt de análisis: cada señal lleva máximo 2 dimensiones.",
       },
     ],
     related: ["tema", "vitalidad", "likedAt", "huerfana", "pestel"],
@@ -69,23 +70,28 @@ Sin pareja, nace un tema nuevo. El id se conserva, así que una señal publicada
 - Indicadores: velocidad (en últimos 30 días vs. 30 anteriores), densidad, conectividad, novedad, numero de temas puente.
 - Horizonte sugerido (H1/H2/H3) o fijado manualmente.
 
-**Muerte y resurrección**: si la vitalidad suma cae bajo 1.0, pasa a \`status: 'dead'\` (fósil).
-No se borra. Si luego entran señales nuevas con vitalidad ≥ 1.0, resucita automáticamente (vuelve a \`status: 'alive'\`).`,
+**Muerte y resurrección**: un tema pasa a \`status: 'dead'\` (fósil) por **dos** caminos distintos, no solo uno:
+1. **Por vitalidad**: emparejó linaje esta corrida, pero la suma de vitalidad de sus miembros cayó bajo 1.0.
+2. **Por linaje**: ninguna comunidad de esta corrida alcanzó Jaccard ≥ 0.3 con su última membresía, así que el linaje no reapareció.
+   Muere **con la vitalidad que tuviera** — puede ser altísima. Casi siempre significa que el tema se fragmentó o se fundió con otro,
+   no que se apagara.
+No se borra en ninguno de los dos casos. Si luego entran señales nuevas con vitalidad ≥ 1.0 que emparejan por linaje, resucita
+automáticamente (vuelve a \`status: 'alive'\`).`,
     constants: [
       {
         name: "Tamaño mínimo para ser tema",
         value: "3 señales",
-        source: "MIN_CLUSTER_SIZE (src/lib/jobs/clusters.ts)",
+        source: "MIN_CLUSTER_SIZE, constante de la detección de comunidades",
       },
       {
         name: "Umbral de linaje (Jaccard)",
         value: "≥ 0.3",
-        source: "LINEAGE_JACCARD (src/lib/jobs/graph.ts)",
+        source: "LINEAGE_JACCARD, umbral de emparejamiento del job de grafo",
       },
       {
         name: "Umbral de muerte",
         value: "< 1.0 de vitalidad",
-        source: "DEAD_THRESHOLD (src/lib/jobs/graph.ts)",
+        source: "DEAD_THRESHOLD, umbral de muerte del modelo de vitalidad",
       },
     ],
     related: ["linaje", "fosil", "resurrección", "vitalidad", "snapshot", "horizonte"],
@@ -99,7 +105,8 @@ No se borra. Si luego entran señales nuevas con vitalidad ≥ 1.0, resucita aut
 
 En cada corrida de grafo, se detectan nuevas comunidades. Cada comunidad se empareja con el tema existente cuya membresía anterior tenga mayor **Jaccard** (solapamiento).
 - Si Jaccard ≥ 0.3: se emparejan. El tema nuevo preserva el \`id\` antiguo, ganando historial.
-- Si Jaccard < 0.3: sin pareja, el tema viejo muere (si no resucita), nace un nuevo con \`id\` nuevo.
+- Si Jaccard < 0.3: sin pareja. El tema viejo pasa a fósil **sin que su vitalidad tenga voz ni voto**, y la comunidad nueva
+  nace como tema con \`id\` nuevo. Es la razón de que existan fósiles con vitalidad alta: el linaje se rompió, las señales no.
 
 Así, una señal publicada hace 6 meses puede entrar en su tema original la próxima corrida porque el tema "lo espera" con su id.
 Es la columna vertebral de la trazabilidad temporal.`,
@@ -108,7 +115,7 @@ Es la columna vertebral de la trazabilidad temporal.`,
       {
         name: "Umbral de emparejamiento",
         value: "Jaccard ≥ 0.3",
-        source: "LINEAGE_JACCARD (src/lib/jobs/graph.ts)",
+        source: "LINEAGE_JACCARD, umbral de emparejamiento del job de grafo",
       },
     ],
     related: ["tema", "fosil", "resurrección", "snapshot"],
@@ -117,9 +124,20 @@ Es la columna vertebral de la trazabilidad temporal.`,
   fosil: {
     key: "fosil",
     term: "Fósil (tema muerto)",
-    short: "Un tema cuya vitalidad suma cayó bajo 1.0 y pasó a estado 'dead', pero se preserva en la base de datos.",
-    long: `Un **fósil** es un tema que murió: su vitalidad total (suma de vitalidad de sus miembros) cayó por debajo de 1.0.
-Pasa a \`status: 'dead'\` y se oculta en la UI por defecto (toggle "mostrar fósiles").
+    short: "Un tema que pasó a estado 'dead' —por apagarse o por perder su linaje— y se preserva íntegro. No es un borrado.",
+    long: `Un **fósil** es un tema que murió y se conserva. Se llega ahí por **dos** caminos, y confundirlos lleva a leer mal el mapa:
+
+1. **Muerte por vitalidad**: la vitalidad total del tema (suma de la de sus miembros) cayó bajo 1.0. Es el tema que se apagó.
+2. **Muerte por linaje**: en la última corrida ninguna comunidad detectada alcanzó Jaccard ≥ 0.3 con su última membresía, así que
+   el linaje no reapareció y el tema pasa a \`dead\` **sin mirar su vitalidad**. Por eso existen fósiles con vitalidad de 40 o más:
+   no murieron de olvido. Sus señales siguen ahí y siguen vivas; lo que se rompió es la continuidad del grupo — típicamente porque
+   el tema se fragmentó en varios o se fundió con otro, que sigue vivo con id propio.
+
+La vitalidad que se muestra de un fósil **no está congelada**: cada corrida la recalcula sumando la vitalidad actual de
+\`lastMemberIds\`, así que sigue decayendo. Un fósil con vitalidad alta es material vivo en un linaje roto, y merece que lo digas
+así al narrarlo.
+
+Un fósil se oculta en la UI por defecto (toggle "mostrar fósiles").
 
 **OJO**: un fósil **no es un tema borrado**. La fila sigue en la DB, con su id, sus miembros guardados en \`lastMemberIds\`, su historia en snapshots.
 Es un archivo, no una desaparición.
@@ -127,12 +145,18 @@ Es un archivo, no una desaparición.
 **Resurrección**: si una nueva señal entra con vitalidad ≥ 1.0 y se empareja por linaje con el fósil, el fósil resucita automáticamente.
 Se cuenta el ciclo en \`revivedCount\`.
 
-Decide el decaimiento de vitalidad, no borrado manual ni filtrado arbitrario. Es reversible.`,
+Lo deciden el decaimiento de vitalidad y el emparejamiento de linaje, nunca un borrado manual ni un filtrado arbitrario.
+Es reversible.`,
     constants: [
       {
         name: "Vitalidad para morir",
         value: "< 1.0",
-        source: "DEAD_THRESHOLD (src/lib/jobs/graph.ts)",
+        source: "DEAD_THRESHOLD, umbral de muerte del modelo de vitalidad",
+      },
+      {
+        name: "Segunda vía de muerte",
+        value: "Jaccard < 0.3 con la membresía anterior (sea cual sea la vitalidad)",
+        source: "LINEAGE_JACCARD, umbral de emparejamiento del job de grafo",
       },
     ],
     related: ["tema", "vitalidad", "resurrección", "linaje"],
@@ -154,7 +178,7 @@ Muestra que un tema que estaba dormido vuelve a ser relevante.`,
       {
         name: "Contador",
         value: "revivedCount (integer)",
-        source: "semantic_clusters.revivedCount (schema)",
+        source: "contador persistido en el propio tema",
       },
     ],
     related: ["fosil", "tema", "vitalidad", "linaje"],
@@ -178,6 +202,8 @@ Muestra que un tema que estaba dormido vuelve a ser relevante.`,
 **Para un tema**:
 - Suma de vitalidad de sus miembros.
 - Si suma < 1.0, el tema pasa a \`dead\` (fósil).
+- **Al revés no vale**: vitalidad alta NO garantiza que el tema esté vivo. Un tema cuyo linaje no empareja en una corrida
+  (Jaccard < 0.3) pasa a fósil con la vitalidad que tenga. Lee siempre \`status\` junto al número, nunca el número solo.
 
 En la UI:
 - **Opacidad del nodo**: proporcional a vitalidad.
@@ -191,17 +217,17 @@ Se recalcula en cada corrida. No es un score estático, sino una foto del "ahora
       {
         name: "HALF_LIFE_DAYS",
         value: "30",
-        source: "GRAPH_HALF_LIFE_DAYS env (src/lib/jobs/graph.ts)",
+        source: "HALF_LIFE_DAYS, vida media configurable del job de grafo",
       },
       {
         name: "ORPHAN_HALF_LIFE_DAYS",
         value: "15 (mitad de 30)",
-        source: "HALF_LIFE_DAYS / 2 (src/lib/jobs/graph.ts)",
+        source: "derivada: la mitad de HALF_LIFE_DAYS",
       },
       {
         name: "Umbral de muerte",
         value: "< 1.0",
-        source: "DEAD_THRESHOLD (src/lib/jobs/graph.ts)",
+        source: "DEAD_THRESHOLD, umbral de muerte del modelo de vitalidad",
       },
     ],
     related: ["senal", "tema", "fosil", "huerfana", "decaimiento"],
@@ -228,12 +254,12 @@ Entonces se empareja (si Jaccard ≥ 0.3) o forma tema nuevo.`,
       {
         name: "ORPHAN_HALF_LIFE_DAYS",
         value: "15",
-        source: "HALF_LIFE_DAYS / 2 (src/lib/jobs/graph.ts)",
+        source: "derivada: la mitad de HALF_LIFE_DAYS",
       },
       {
         name: "Tamaño mínimo de comunidad",
         value: "3",
-        source: "MIN_CLUSTER_SIZE (src/lib/jobs/clusters.ts)",
+        source: "MIN_CLUSTER_SIZE, constante de la detección de comunidades",
       },
     ],
     related: ["senal", "tema", "vitalidad", "embeddingsingularidad"],
@@ -255,23 +281,23 @@ Entonces se empareja (si Jaccard ≥ 0.3) o forma tema nuevo.`,
 
 **En la UI**: "Tendencia consolidada: grande, viva y cerca del centro del mapa."
 
-**Administración**: Frida puede fijar un tema manualmente a H1 (\`horizonSource = 'manual'\`),
-y entonces la corrida automática **no lo pisa** (respeta la decisión manual).`,
+**Decisión manual**: puedes fijar un tema a H1 desde la app (\`horizonSource = 'manual'\`),
+y entonces la corrida automática **no lo pisa** (respeta lo que fijaste a mano).`,
     constants: [
       {
         name: "Size mínimo",
         value: "≥ 8",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
       {
         name: "Vitalidad mínima",
         value: "≥ 3",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
       {
         name: "Novedad máxima",
         value: "≤ mediana",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
     ],
     related: ["horizonte", "H2", "H3", "velocidad", "novedad"],
@@ -320,17 +346,17 @@ Si no reclutan más señales, caerán a \`dead\` (fósiles). Si reclutan, migran
       {
         name: "Size máximo",
         value: "< 5",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
       {
         name: "Vitalidad máxima",
         value: "< 1.5",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
       {
         name: "Novedad mínima",
         value: "> p75",
-        source: "suggestHorizons (src/lib/jobs/graph.ts)",
+        source: "heurística de horizontes del job de grafo",
       },
     ],
     related: ["horizonte", "H1", "H2", "vitalidad", "novedad"],
@@ -349,8 +375,8 @@ Son tres:
 
 **Generación automática** (cada corrida, en \`suggestHorizons\`):
 La corrida propone H1/H2/H3 basado en indicadores: size, vitalidad, novedad.
-Frida puede fijar un tema manualmente a un horizonte (\`horizonSource = 'manual'\`),
-y entonces la corrida respeta esa decisión (no lo pisa).
+Puedes fijar un tema a mano a un horizonte desde la app (\`horizonSource = 'manual'\`),
+y entonces la corrida respeta esa decisión (no la pisa).
 
 **En la API y la UI**:
 - Cada respuesta de tema incluye \`horizon\` (null si no asignado) y \`horizonSuggested\` (la propuesta automática).
@@ -363,7 +389,7 @@ Es **la herramienta principal para responder "¿en qué etapa estamos?"**.`,
       {
         name: "Máximo de macro-temas por horizonte",
         value: "5",
-        source: "MAX_MACRO_PER_HORIZON (src/lib/jobs/graph.ts)",
+        source: "MAX_MACRO_PER_HORIZON, tope de la agrupación de segundo nivel",
       },
     ],
     related: ["H1", "H2", "H3", "tema", "velocidad", "novedad", "macrotheme"],
@@ -500,7 +526,7 @@ Es el tema que "traduce" entre dominios. Ejemplo: un tema sobre "regulación de 
 - Son temas "en transición" o "de fusión".
 
 **En la API**: se identifica por su \`connectivity\` y \`bridgeThemes\`.
-Frida puede usarlos como puntos de pivote en la narración de escenarios.`,
+Sirven como puntos de pivote al narrar escenarios.`,
     related: ["tema", "conectividad", "horizonte", "H2"],
   },
 
@@ -532,12 +558,12 @@ Para análisis profundo, usa temas individuales.`,
       {
         name: "Máximo por horizonte",
         value: "5",
-        source: "MAX_MACRO_PER_HORIZON (src/lib/jobs/graph.ts)",
+        source: "MAX_MACRO_PER_HORIZON, tope de la agrupación de segundo nivel",
       },
       {
         name: "Linaje",
         value: "Ninguno (se recrean cada corrida)",
-        source: "src/lib/jobs/graph.ts: borran y recrean",
+        source: "por diseño del job de grafo: se borran y se recrean en cada corrida",
       },
     ],
     related: ["tema", "horizonte", "H1", "H2", "H3"],
@@ -573,8 +599,7 @@ Se crea en cada corrida, con:
       {
         name: "Datos preservados",
         value: "takenAt, trigger, nodos, aristas, temesAlive, themesDead, huérfanas, indicadores",
-        source:
-          "src/app/api/public/v1/snapshots y graph_snapshot* (schema de Prisma)",
+        source: "lo que congela cada foto del grafo",
       },
     ],
     related: ["tema", "vitalidad", "linaje", "horizonte"],
@@ -608,12 +633,12 @@ Si toca más de 2, el analista elige las 2 más relevantes. Esto agiliza el aná
       {
         name: "Dimensiones",
         value: "Political, Economic, Social, Technological, Environmental, Legal",
-        source: "PESTEL_DIMENSIONS (src/config/pestel.ts)",
+        source: "catálogo PESTEL fijo del método",
       },
       {
         name: "Máximo por señal",
         value: "2",
-        source: "Regla de análisis (src/lib/analysis-prompts.ts)",
+        source: "Regla del prompt de análisis",
       },
     ],
     related: ["senal", "categoria", "categorización"],
@@ -626,10 +651,10 @@ Si toca más de 2, el analista elige las 2 más relevantes. Esto agiliza el aná
     long: `Una **categoría** es una etiqueta temática que clasifica el contenido de una señal.
 
 **Origen**:
-- **Catálogo curado**: categorías editables vía \`/categorias\` (admin-only). Viven en la tabla \`categories\`.
+- **Catálogo curado**: las categorías que editas tú en \`/categorias\`. Son tuyas: cada banco tiene su propio catálogo.
   Ejemplo: "Inteligencia Artificial", "Biología", "Política".
 - **Propuestas del modelo**: el análisis automático (Claude + Ollama) propone categorías nuevas.
-  Inicialmente \`inCatalog: false\`; Frida puede promoverlas al catálogo manual.
+  Inicialmente \`inCatalog: false\`; puedes promoverlas al catálogo curado desde la app.
 
 **Atributos** (en DTO \`CategoryDTO\`):
 - \`name\`: nombre de la categoría.
@@ -638,9 +663,9 @@ Si toca más de 2, el analista elige las 2 más relevantes. Esto agiliza el aná
 - \`examples\`: ejemplos de señales.
 
 **Edición**:
-- En \`/categorias\`, Frida puede crear, editar, eliminar, reordenar (drag-drop).
-- Endpoint \`POST /api/categories/recategorize\` (admin-only) relimpia categorías automáticas de un rango temporal,
-  respetando \`*Source = 'manual'\` (no toca lo que Frida fijó a mano).
+- En \`/categorias\` de la app puedes crear, editar, eliminar y reordenar (drag-drop) las categorías de tu banco.
+- La app permite recategorizar de golpe un rango temporal (solo sobre tu propio banco), rehaciendo las categorías automáticas
+  respetando \`*Source = 'manual'\` (no toca lo que hayas fijado a mano).
 
 **En la API**:
 - Endpoint \`/categories\` devuelve el catálogo completo (curado + propuestas).
@@ -688,12 +713,12 @@ Si toca más de 2, el analista elige las 2 más relevantes. Esto agiliza el aná
       {
         name: "Umbral de arista",
         value: "≥ 0.55 (coseno)",
-        source: "SEMANTIC_LINK_THRESHOLD (src/lib/jobs/graph.ts)",
+        source: "SEMANTIC_LINK_THRESHOLD, umbral de arista del grafo semántico",
       },
       {
         name: "Top-K por señal",
         value: "8",
-        source: "SEMANTIC_LINK_TOP_K (src/lib/jobs/embed.ts)",
+        source: "SEMANTIC_LINK_TOP_K, tope de vecinos por señal al construir el grafo",
       },
     ],
     related: ["tema", "grafo", "densidad", "novedad", "puente"],
@@ -704,10 +729,10 @@ Si toca más de 2, el analista elige las 2 más relevantes. Esto agiliza el aná
     term: "likedAt (fecha estimada del like)",
     short:
       "La fecha en que se hizo el like. **Siempre es una estimación**, no un dato exacto. Se muestra con `~` (virgulilla).",
-    long: `La **\`likedAt\`** es la fecha estimada en que Frida puso un like a una publicación de X.
+    long: `La **\`likedAt\`** es la fecha estimada en que guardaste una publicación de X con un like.
 
 **¿Por qué estimada?**
-La X API no expone cuándo se hace un like. Frida descargó el historial con una herramienta tercera,
+La X API no expone cuándo se hace un like. El historial se importó con una herramienta externa,
 que solo sabe cuándo detectó el like en un polling, no cuándo ocurrió realmente.
 
 **Tres fechas distintas en cada señal** (\`liked_items\`):
@@ -715,7 +740,7 @@ que solo sabe cuándo detectó el like en un polling, no cuándo ocurrió realme
 2. **\`detectedAt\`**: exacta (del polling). Cuándo la herramienta lo detectó.
 3. **\`likedAt\`**: estimada. Acotada entre dos corridas de polling consecutivas.
 
-En esta columna, Frida ve \`detectedAt\`. En \`likedAt\`, el valor se estima como la fecha intermedia o se guarda explícitamente (si el usuario lo fija manualmente).
+Lo que la app muestra en esa columna es \`detectedAt\`. El valor de \`likedAt\` se estima como la fecha intermedia entre dos pollings, salvo que lo hayas fijado tú a mano.
 
 **En la API y la UI**:
 - \`likedAt\` siempre se **muestra con una virgulilla**: \`~ 25 ago 2026\`, **nunca sin ella**.
@@ -730,12 +755,12 @@ En esta columna, Frida ve \`detectedAt\`. En \`likedAt\`, el valor se estima com
       {
         name: "Representación visual",
         value: "~ fecha",
-        source: "Regla de formato (docs/TOOLS.md, docs/DOMAIN.md)",
+        source: "Regla de formato del método",
       },
       {
         name: "likedAtEstimated",
         value: "true (siempre)",
-        source: "SignalDTO (src/lib/public-dto.ts)",
+        source: "campo literal del DTO de señal",
       },
     ],
     related: ["senal", "tweetCreatedAt", "detectedAt"],
@@ -758,6 +783,8 @@ En esta columna, Frida ve \`detectedAt\`. En \`likedAt\`, el valor se estima com
 **Huérfanas**: decaen al doble (HALF_LIFE = 15 días). Si nada llega a acompañarlas, se apagan rápido.
 
 **Muerte de tema**: si la suma de vitalidad de los miembros cae bajo 1.0, el tema muere (pasa a \`dead\`/fósil).
+Es la muerte que provoca el decaimiento — pero no la única que existe: un tema también pasa a fósil si su linaje no empareja
+en una corrida, y eso ocurre a cualquier vitalidad (ver "Fósil").
 
 **Propósito**: es el "olvido" natural del sistema. Lo que fue novedoso hace un año pierde importancia a menos que algo nuevo lo reactive.
 Sin decaimiento, el mapa acumularía ruido histórico.`,
@@ -765,12 +792,12 @@ Sin decaimiento, el mapa acumularía ruido histórico.`,
       {
         name: "HALF_LIFE_DAYS",
         value: "30 días",
-        source: "GRAPH_HALF_LIFE_DAYS env",
+        source: "HALF_LIFE_DAYS, vida media configurable del job de grafo",
       },
       {
         name: "ORPHAN_HALF_LIFE_DAYS",
         value: "15 días",
-        source: "HALF_LIFE_DAYS / 2",
+        source: "derivada: la mitad de HALF_LIFE_DAYS",
       },
     ],
     related: ["vitalidad", "senal", "huerfana", "fosil"],

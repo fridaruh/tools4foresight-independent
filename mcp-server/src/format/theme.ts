@@ -8,7 +8,7 @@ import {
   formatEstimatedDate,
   formatHorizonLabel,
   formatThemeStatus,
-  formatVitality,
+  formatThemeVitality,
   paginationFooter,
 } from './shared.js';
 import type {
@@ -40,7 +40,7 @@ export function formatThemeSummary(theme: ThemeSummaryDTO): string {
   lines.push(`- **Estado**: ${formatThemeStatus(theme.status)}`);
   lines.push(`- **Horizonte**: ${formatHorizonLabel(theme.horizon)}`);
   lines.push(`- **Tamaño**: ${theme.size} señales`);
-  lines.push(`- **Vitalidad**: ${formatVitality(theme.vitality)}`);
+  lines.push(`- **Vitalidad**: ${formatThemeVitality(theme.vitality, theme.status)}`);
   if (theme.macroTheme) lines.push(`- **Macro-tema**: ${externalInline(theme.macroTheme.name)}`);
   // ESTIMADA: es el `likedAt` de la señal más reciente del tema.
   if (theme.lastSignalAt) lines.push(`- **Última señal**: ${formatEstimatedDate(theme.lastSignalAt)}`);
@@ -97,19 +97,55 @@ function formatHistoricalStatus(status: string): string {
 }
 
 /**
+ * `SnapshotThemeRowDTO.status` viaja como `string` suelto (es un valor
+ * histórico, no el enum vivo), pero `formatThemeVitality` necesita saber si esa
+ * fila era un fósil. Cualquier cosa que no sea `'dead'` se trata como viva: si
+ * llegara un estado nuevo, la etiqueta cualitativa normal es la lectura menos
+ * arriesgada, y el estado crudo se muestra igual al lado.
+ */
+function historicalVitality(vitality: number, status: string): string {
+  return formatThemeVitality(vitality, status === 'dead' ? 'dead' : 'alive');
+}
+
+/**
  * Serie temporal de un tema. SIEMPRE en el mismo orden en que llega el DTO
  * (ascendente por `takenAt`, garantizado por el servidor — docs/API.md §4.9):
  * este formateador no reordena nada, para no invertir por accidente una serie
  * que ya viene lista para graficar.
+ *
+ * EL NOMBRE DE CADA PUNTO ES EL DE AQUELLA CORRIDA, NO EL ACTUAL, y eso se dice
+ * con todas las letras. El job de grafo rebautiza un tema (con el modelo) cada
+ * vez que cambia su membresía, y `graph_snapshot_clusters` congela el nombre que
+ * tenía en esa foto. Resultado verificado en producción: `get_theme` devuelve
+ * "Portales gubernamentales mexicanos caídos" y el histórico del MISMO id dice
+ * "Enlaces rotos de fuentes oficiales". Sin la nota, la conclusión razonable de
+ * un modelo es que se equivocó de id — y es la conclusión equivocada.
+ *
+ * `currentName` es opcional a propósito: lo pasa la tool cuando pudo resolver el
+ * nombre vigente, y si no pudo (o si nadie lo pasa) el encabezado cae al id, que
+ * es lo único estable de un tema. Nunca se titula con el nombre del primer punto
+ * como se hacía antes: ese es el nombre MÁS VIEJO de todos, el peor candidato a
+ * pasar por "el nombre del tema".
  */
-export function formatThemeHistory(history: ThemeHistoryDTO): string {
+export function formatThemeHistory(history: ThemeHistoryDTO, currentName?: string): string {
   if (history.points.length === 0) return 'Sin puntos históricos para este tema en el rango pedido.';
-  const title = externalInline(history.points[0]?.name ?? history.themeId);
+  const title = currentName ? externalInline(currentName) : history.themeId;
   const rows = history.points.map((point) => {
     const status = formatHistoricalStatus(point.status);
-    return `- ${formatDateTime(point.takenAt)} (${point.trigger}): tamaño ${point.size}, ${status}, ${formatVitality(point.vitality)}, velocidad ${point.velocity30d}, ${formatHorizonLabel(point.horizon)}`;
+    const name = externalInline(point.name);
+    return `- ${formatDateTime(point.takenAt)} (${point.trigger}) — se llamaba «${name}»: tamaño ${point.size}, ${status}, ${historicalVitality(point.vitality, point.status)}, velocidad ${point.velocity30d}, ${formatHorizonLabel(point.horizon)}`;
   });
-  return [`## Historia de "${title}"`, '', ...rows].join('\n');
+  const header = [
+    `## Historia de ${currentName ? `"${title}" (nombre actual)` : `\`${title}\``}`,
+    '',
+    `- **id**: \`${history.themeId}\` — es lo único estable de un tema: persiste aunque cambie de nombre, muera y resucite.`,
+    '',
+    '_El nombre que aparece en cada punto es el que el tema tenía EN ESA CORRIDA. Se regenera cada vez que ' +
+      'cambia su membresía, así que ver nombres distintos a lo largo de la serie es lo normal y NO significa ' +
+      'que sean temas distintos ni que te hayas equivocado de id._',
+    '',
+  ];
+  return [...header, ...rows].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +178,7 @@ export function formatHorizon(horizon: HorizonDetailDTO): string {
   ];
   if (horizon.themes.length > 0) {
     lines.push('', '**Temas**');
-    for (const theme of horizon.themes) lines.push(`- ${externalInline(theme.name)} — ${formatVitality(theme.vitality)}`);
+    for (const theme of horizon.themes) lines.push(`- ${externalInline(theme.name)} — ${formatThemeVitality(theme.vitality, theme.status)}`);
   }
   return lines.join('\n');
 }
@@ -188,7 +224,7 @@ export function formatMacroTheme(macro: MacroThemeDTO): string {
   ];
   if (macro.themes.length > 0) {
     lines.push('', '**Temas**');
-    for (const theme of macro.themes) lines.push(`- ${externalInline(theme.name)} — ${formatVitality(theme.vitality)}`);
+    for (const theme of macro.themes) lines.push(`- ${externalInline(theme.name)} — ${formatThemeVitality(theme.vitality, theme.status)}`);
   }
   return lines.join('\n');
 }
@@ -238,9 +274,13 @@ export function formatSnapshot(snapshot: SnapshotDetailDTO, meta?: ApiMeta): str
   ];
 
   if (snapshot.themes.length > 0) {
-    lines.push('', '**Temas en esta corrida**');
+    // Mismo cuidado que en `formatThemeHistory`: estos nombres son los que cada
+    // tema tenía EN ESTA CORRIDA (`graph_snapshot_clusters` los congela), no los
+    // de hoy. Sin la nota, comparar un snapshot con `list_themes` parece un
+    // desajuste de datos y es solo el paso del tiempo.
+    lines.push('', '**Temas en esta corrida** _(con el nombre que tenían entonces, no el actual)_');
     for (const theme of snapshot.themes) {
-      lines.push(`- ${externalInline(theme.name)}: ${formatHistoricalStatus(theme.status)}, ${formatVitality(theme.vitality)}`);
+      lines.push(`- ${externalInline(theme.name)}: ${formatHistoricalStatus(theme.status)}, ${historicalVitality(theme.vitality, theme.status)}`);
     }
   }
 

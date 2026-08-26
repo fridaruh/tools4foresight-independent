@@ -89,6 +89,10 @@ export function formatEstimatedDate(iso: string): string {
  * miembros, sin techo): una señal rara vez llega a "viva" bajo esta escala, y
  * eso es correcto — "viva" en esta función siempre significa "lejos de
  * apagarse", no "es una señal reciente".
+ *
+ * Lo que estos tramos NO saben es si un TEMA está vivo: la vitalidad no es la
+ * única vía a fósil (ver `formatThemeVitality`). Por eso esta función es privada
+ * y quien formatea un tema pasa siempre por ahí.
  */
 function vitalityLabel(vitality: number): string {
   if (vitality >= 2) return 'viva';
@@ -97,10 +101,56 @@ function vitalityLabel(vitality: number): string {
   return 'casi extinta';
 }
 
-/** `2.31 (viva)` / `0.42 (apagándose)`. Siempre 2 decimales cuando hay valor. */
+/**
+ * `2.31 (viva)` / `0.42 (apagándose)`. Siempre 2 decimales cuando hay valor.
+ *
+ * Para la vitalidad de un TEMA usa `formatThemeVitality`, que además sabe si el
+ * tema está vivo o es un fósil: esta función sola escribiría "47.42 (viva)"
+ * junto a un tema fósil, que es una contradicción de bulto.
+ */
 export function formatVitality(vitality: number | null): string {
   if (vitality === null) return 'sin vitalidad calculada (aún no entra al grafo semántico)';
   return `${vitality.toFixed(2)} (${vitalityLabel(vitality)})`;
+}
+
+/** El `DEAD_THRESHOLD` del job de grafo: bajo esta suma un tema pasa a fósil (ver glossary.ts:vitalidad). */
+const DEAD_THRESHOLD = 1;
+
+/**
+ * Vitalidad de un TEMA, leída junto a su estado. Existe porque
+ * `formatVitality` a secas producía en producción líneas como
+ * `Estado: fósil — Vitalidad: 47.42 (viva)`.
+ *
+ * La etiqueta cualitativa no estaba mal: 47.42 está lejísimos del umbral de
+ * muerte. Lo que estaba mal era el supuesto de que un tema solo muere por
+ * vitalidad. En el job de grafo hay DOS caminos a fósil, y el segundo no mira
+ * el número (ver glossary.ts:fosil y :linaje):
+ *
+ * 1. **Por vitalidad**: el linaje sí emparejó esta corrida, pero la suma de
+ *    vitalidad de sus miembros quedó bajo 1.0.
+ * 2. **Por linaje**: ninguna comunidad detectada en esta corrida alcanzó
+ *    Jaccard ≥ 0.3 con su última membresía, así que el linaje no reapareció y
+ *    pasa a fósil con la vitalidad que tuviera — pueden ser 47.
+ *
+ * La vitalidad que se muestra en el caso 2 NO es un valor congelado del pasado:
+ * el job la recalcula cada corrida sumando la vitalidad actual de
+ * `lastMemberIds`, así que sigue decayendo. Es material vivo en un linaje que
+ * se rompió, y decirlo es información útil para quien lee — un tema que murió
+ * sin perder vitalidad casi siempre se fragmentó o se fusionó con otro, no se
+ * apagó.
+ */
+export function formatThemeVitality(vitality: number | null, status: ThemeStatus): string {
+  if (vitality === null) return 'sin vitalidad calculada (aún no entra al grafo semántico)';
+  const value = vitality.toFixed(2);
+  if (status !== 'dead') return `${value} (${vitalityLabel(vitality)})`;
+  if (vitality < DEAD_THRESHOLD) {
+    return `${value} (fósil: cayó bajo el umbral de muerte de ${DEAD_THRESHOLD.toFixed(1)})`;
+  }
+  return (
+    `${value} (fósil, pero no por apagarse: su linaje no emparejó en la última corrida ` +
+    `—ninguna comunidad alcanzó Jaccard ≥ 0.3 con su membresía—, así que murió con esa ` +
+    `vitalidad intacta. Suele significar que se fragmentó o se fundió con otro tema)`
+  );
 }
 
 // ---------------------------------------------------------------------------
