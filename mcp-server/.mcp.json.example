@@ -1,0 +1,13 @@
+{
+  "//": "Copia este bloque a la configuración MCP de tu cliente (Claude Code, Claude Desktop, Cursor).",
+  "//2": "La clave del header ES tu identidad: determina qué banco de señales se lee. Genérala en /perfil de tu instancia de tools4foresight. No la compartas: quien la tenga lee tu banco entero.",
+  "mcpServers": {
+    "tools4foresight": {
+      "type": "http",
+      "url": "https://<el-despliegue-mcp>/api/mcp",
+      "headers": {
+        "Authorization": "Bearer t4f_tu-api-key-personal"
+      }
+    }
+  }
+}

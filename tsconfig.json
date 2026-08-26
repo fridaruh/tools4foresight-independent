@@ -30,5 +30,10 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules"]
+  // `mcp-server/` es un paquete aparte (el servidor MCP, con su propio
+  // tsconfig, su module resolution NodeNext y sus imports con extensión .js).
+  // Sin esta exclusión el `include: ["**/*.ts"]` de arriba lo arrastraría al
+  // typecheck y al `next build` de la app, que fallarían por reglas que no son
+  // las suyas.
+  "exclude": ["node_modules", "mcp-server"]
 }
