@@ -63,7 +63,7 @@ guarda en ningún lado.
 
 | Variable | Obligatoria | Default | Qué es |
 |---|---|---|---|
-| `T4F_API_BASE_URL` | **sí** | — (a propósito) | URL base de la API pública de tu instancia, terminada en `/api/public/v1`. Sin default: uno malo mandaría claves de usuarios al host equivocado |
+| `T4F_API_BASE_URL` | **sí** | — (a propósito) | URL base de la API pública de tu instancia, terminada en `/api/public/v1`. La instancia oficial es `https://individual.tools4foresight.com/api/public/v1`. Sin default: uno malo mandaría claves de usuarios al host equivocado |
 | `T4F_TIMEOUT_MS` | no | `15000` | Timeout por petición |
 | `T4F_RETRIES` | no | `2` | Reintentos en 429/5xx/red. Nunca se reintenta un 401 |
 | `T4F_CACHE_TTL_MS` | no | `60000` | `0` desactiva la caché. La caché vive dentro del cliente de cada petición: nunca se comparte entre personas |

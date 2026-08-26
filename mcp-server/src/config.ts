@@ -29,12 +29,19 @@ export type LogLevel = 'silent' | 'error' | 'debug';
 // mejor caso da 401 confusos, y en el peor manda la clave de un usuario a un
 // host que no es el suyo. Así que la variable es obligatoria y el error dice
 // exactamente qué poner.
+// La instancia oficial. Se usa como EJEMPLO en los mensajes de error y es lo que
+// hay que poner en la mayoría de los despliegues — pero no como valor por
+// defecto: ver el comentario de arriba. Quien corra su propia instancia de
+// tools4foresight apunta a la suya, y el arranque fallido es lo que le obliga a
+// decidirlo en vez de descubrirlo por un 401 raro.
+export const PRODUCTION_BASE_URL = 'https://individual.tools4foresight.com/api/public/v1';
+
 const MISSING_BASE_URL_MESSAGE =
   'Falta T4F_API_BASE_URL: pon la URL base de la API pública de tu despliegue de tools4foresight, ' +
-  'terminada en /api/public/v1 (por ejemplo "https://<tu-dominio>/api/public/v1"). ' +
+  `terminada en /api/public/v1. La instancia oficial es "${PRODUCTION_BASE_URL}". ` +
   'No hay valor por defecto a propósito: este servidor es multi-tenant y no debe adivinar contra qué instancia habla.';
 
-const EXAMPLE_BASE_URL = 'https://tu-dominio-de-tools4foresight/api/public/v1';
+const EXAMPLE_BASE_URL = PRODUCTION_BASE_URL;
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_RETRIES = 2;
 const DEFAULT_CACHE_TTL_MS = 60_000;

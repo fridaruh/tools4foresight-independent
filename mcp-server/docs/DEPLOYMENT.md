@@ -36,6 +36,8 @@ vercel link
 
 # La ÚNICA obligatoria. Debe terminar en /api/public/v1 y ser https.
 vercel env add T4F_API_BASE_URL production
+# valor para la instancia oficial:
+#   https://individual.tools4foresight.com/api/public/v1
 
 vercel deploy --prod
 ```
