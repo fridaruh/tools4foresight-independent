@@ -21,7 +21,8 @@
     "qa:dispatch": "tsx scripts/qa-dispatch.ts",
     "qa:ui": "tsx scripts/qa-ui-smoke.ts",
     "qa:cats": "tsx scripts/qa-categories.ts",
-    "qa:admin": "tsx scripts/qa-admin.ts"
+    "qa:admin": "tsx scripts/qa-admin.ts",
+    "qa:public": "tsx scripts/qa-public-api.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.0",

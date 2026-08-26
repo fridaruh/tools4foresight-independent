@@ -34,6 +34,9 @@ model User {
 
   sessions Session[]
   accounts Account[]
+  // Credenciales de portador del usuario. No es tabla de tenant (no lleva RLS:
+  // es el query que descubre al tenant), pero sí muere con la cuenta.
+  apiKeys  ApiKey[]
 
   // Tenant: todo lo de abajo muere con el usuario (borrar cuenta = borrar banco).
   xAuthToken            XAuthToken?
@@ -101,6 +104,56 @@ model Verification {
   updatedAt  DateTime? @updatedAt @map("updated_at")
 
   @@map("verifications")
+}
+
+// Claves de la API pública (/api/public/v1) y del MCP remoto. Cada persona las
+// genera desde /perfil; no hay claves de entorno ni claves compartidas (PLAN_MCP
+// §0.1): una clave sin dueño no tendría banco que leer.
+//
+// SIN RLS A PROPÓSITO — la misma excepción que sessions/accounts/verifications.
+// `resolveApiKey()` (src/lib/api-keys.ts) es EL query que descubre quién es el
+// tenant: corre antes de que exista un `app.owner_id` que fijar, así que una
+// política de RLS aquí devolvería cero filas siempre y nadie podría autenticarse.
+// A cambio, todo acceso a esta tabla lleva `userId` en el `where`, sin excepción.
+// Ver el comentario de cabecera de src/lib/tenant-db.ts.
+//
+// `keyHash` guarda el SHA-256 hex de la clave y NUNCA su texto plano. Una clave
+// de API es una credencial de portador: quien la lee, entra — y aquí entra al
+// banco entero de una persona. Si se guardara en claro, un volcado de la base (o
+// un `select *` en un log) sería acceso directo al material de todos los tenants
+// a la vez, sin forma de saber que pasó. Como el texto plano no se persiste, la
+// app solo lo ve una vez —en el POST que la crea— y de ahí en adelante
+// únicamente puede comprobar si una clave entrante hashea a algo conocido. Por
+// eso no hay "ver mi clave" en la UI: solo revocar y crear otra. SHA-256 pelado
+// y no bcrypt/argon2 a propósito: esto no es una contraseña humana adivinable
+// sino 32 bytes de `crypto.randomBytes`, así que no hay diccionario que valga y
+// el hash lento solo agregaría latencia a cada request de un agente. `@unique`
+// sobre el hash es lo que hace que resolver una clave sea un índice y no un scan.
+//
+// `prefix` son los primeros ~10 caracteres visibles ("t4f_AbC12…"): es lo único
+// que permite al usuario distinguir "mi laptop" de "el MCP" en la lista sin que
+// sirva para autenticar (el resto de la entropía falta).
+//
+// `revokedAt` es soft-delete: revocar conserva el rastro (cuándo existió, cuándo
+// se usó por última vez) para poder auditar después de un incidente. Una fila
+// borrada no cuenta nada.
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String    @map("user_id")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Etiqueta que escribe el usuario ("mi laptop"). Sin unicidad: es un recordatorio, no un identificador.
+  name       String
+  /// SHA-256 hex de la clave. El texto plano no se guarda en ningún lado.
+  keyHash    String    @unique @map("key_hash")
+  /// Primeros caracteres de la clave, para reconocerla en la lista.
+  prefix     String
+  /// Se escribe como mucho una vez por hora (ver api-keys.ts): un UPDATE por request es escritura de más en el camino caliente.
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  revokedAt  DateTime? @map("revoked_at")
+
+  @@index([userId])
+  @@map("api_keys")
 }
 
 // --- Tenant: cuotas y uso ---

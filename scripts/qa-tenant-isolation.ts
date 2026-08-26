@@ -15,8 +15,34 @@
 import "dotenv/config";
 import { randomUUID } from "node:crypto";
 import { prisma } from "../src/lib/prisma";
-import { withOwner, withPlatformBypass } from "../src/lib/tenant-db";
+import { withOwner, withPlatformBypass, TENANT_MODEL_FIELD } from "../src/lib/tenant-db";
 import { seedTenant } from "../src/lib/seed-tenant";
+
+/**
+ * Las tablas que NO llevan política de RLS, y que por lo tanto tienen que estar
+ * declaradas aquí a mano. Es la misma lista del comentario de cabecera de
+ * src/lib/tenant-db.ts, y el check 9 la compara contra la base: una tabla nueva
+ * sin política que nadie declaró hace fallar el QA en vez de pasar desapercibida.
+ *
+ *   - users/sessions/accounts/verifications: better-auth. `getSession()` corre
+ *     ANTES de que exista un `app.owner_id` que fijar.
+ *   - api_keys: mismo argumento con `Bearer` en vez de cookie. `resolveApiKey()`
+ *     es el query que DESCUBRE al tenant (src/lib/api-keys.ts); con RLS encima
+ *     devolvería cero filas y nadie podría autenticarse. Se compensa en la
+ *     aplicación: todo acceso lleva `user_id` en el `where`.
+ *   - rate_limits/platform_flags: son de la plataforma, no de nadie.
+ *   - _prisma_migrations: metadata de Prisma.
+ */
+const NON_TENANT_TABLES = new Set([
+  "users",
+  "sessions",
+  "accounts",
+  "verifications",
+  "api_keys",
+  "rate_limits",
+  "platform_flags",
+  "_prisma_migrations",
+]);
 
 let failures = 0;
 
@@ -63,6 +89,54 @@ async function makeItem(ownerId: string, label: string): Promise<string> {
     });
     return item.id;
   });
+}
+
+/**
+ * Compara el estado real de la base contra las dos listas del código.
+ *
+ * No hace falta traducir modelo -> nombre de tabla (`likedItem` -> `liked_items`
+ * no es derivable): basta con partir las tablas de `public` en dos por su
+ * `rowsecurity` y comprobar que las que NO tienen política son exactamente
+ * `NON_TENANT_TABLES`, y que las que sí son tantas como entradas hay en
+ * `TENANT_MODEL_FIELD`. Cualquier tabla nueva cae en un lado o en el otro, y las
+ * dos direcciones fallan si no se declaró.
+ */
+async function checkRlsCoverage(): Promise<void> {
+  const tablas = await prisma.$queryRaw<Array<{ tablename: string; rowsecurity: boolean }>>`
+    SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public'
+  `;
+
+  const sinRls = tablas.filter((t) => !t.rowsecurity).map((t) => t.tablename).sort();
+  const conRls = tablas.filter((t) => t.rowsecurity).map((t) => t.tablename).sort();
+
+  const noDeclaradas = sinRls.filter((t) => !NON_TENANT_TABLES.has(t));
+  check(
+    "toda tabla sin RLS está declarada como excepción en NON_TENANT_TABLES",
+    noDeclaradas.length === 0,
+    `sin política y sin declarar: ${noDeclaradas.join(", ")}`,
+  );
+
+  const declaradasQueSiTienen = [...NON_TENANT_TABLES].filter((t) => conRls.includes(t));
+  check(
+    "ninguna excepción declarada tiene política de RLS (la lista no está obsoleta)",
+    declaradasQueSiTienen.length === 0,
+    `declaradas como excepción pero con política: ${declaradasQueSiTienen.join(", ")}`,
+  );
+
+  check(
+    "api_keys existe y está en la excepción documentada (resolveApiKey descubre al tenant)",
+    sinRls.includes("api_keys"),
+    tablas.some((t) => t.tablename === "api_keys")
+      ? "api_keys tiene RLS: resolveApiKey devolvería cero filas y nadie podría autenticarse"
+      : "la tabla api_keys no existe; ¿falta correr la migración?",
+  );
+
+  const esperadas = Object.keys(TENANT_MODEL_FIELD).length;
+  check(
+    "hay tantas tablas con RLS como modelos en TENANT_MODEL_FIELD",
+    conRls.length === esperadas,
+    `la base tiene ${conRls.length} con política y TENANT_MODEL_FIELD lista ${esperadas}: ${conRls.join(", ")}`,
+  );
 }
 
 async function main() {
@@ -146,8 +220,21 @@ async function main() {
     check("el catálogo de A no se ve desde B", catsB === 0, `B ve ${catsB}`);
 
     // 8. El bypass de plataforma sí ve los dos tenants (es lo que usa el seed).
-    const total = await withPlatformBypass((tx) => tx.likedItem.count());
+    // Se cuenta acotando a los dos usuarios de prueba, no la tabla entera: una
+    // base de desarrollo tiene señales reales y un `count()` sin filtro haría
+    // fallar el check por dato, no por una fuga — que es justo lo que este
+    // script existe para detectar. Lo que se afirma es que el bypass ve a LOS
+    // DOS tenants, y para eso los dos ids son la muestra exacta.
+    const total = await withPlatformBypass((tx) =>
+      tx.likedItem.count({ where: { ownerId: { in: [userA, userB] } } }),
+    );
     check("withPlatformBypass ve las señales de ambos tenants", total === 2, `contó ${total}`);
+
+    // 9. Cobertura: la lista de tablas con RLS en la base contra las dos listas
+    // que mantiene el código (TENANT_MODEL_FIELD y NON_TENANT_TABLES). Es lo que
+    // convierte las excepciones —`api_keys` la más reciente— en algo declarado y
+    // verificado, no en un hueco que nadie nota hasta que filtra.
+    await checkRlsCoverage();
   } finally {
     await withPlatformBypass(async (tx) => {
       // Cascade: se lleva señales, categorías, cuota y todo lo del tenant.

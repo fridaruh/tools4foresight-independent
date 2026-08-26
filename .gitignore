@@ -42,3 +42,7 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Datos de trabajo (CSV de fuentes). Este repo es PÚBLICO: los volcados
+# de enlaces y de contenido rastreado no se publican.
+*.csv

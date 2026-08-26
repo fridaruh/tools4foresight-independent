@@ -38,12 +38,24 @@
  *     acceden solo a través de better-auth (`auth.api.*`) o, en los tres puntos
  *     que lo necesitan (`/api/perfil`, `/api/perfil/password`, `/perfil`),
  *     con un `where` que siempre lleva el `userId` de la sesión.
+ *   - `api_keys`: mismo argumento circular, un piso más abajo. `resolveApiKey()`
+ *     (src/lib/api-keys.ts) es EL query que descubre quién es el tenant cuando la
+ *     credencial es un `Bearer` y no una cookie: corre antes de que exista un
+ *     `app.owner_id` que fijar, así que con la política encima devolvería cero
+ *     filas siempre y nadie podría autenticarse contra `/api/public/v1` ni contra
+ *     el MCP. A cambio, TODO acceso a `api_keys` lleva el `userId` en el `where`
+ *     (crear, listar, revocar, tocar `lastUsedAt`); la única lectura sin `userId`
+ *     es la del `keyHash`, y ese hash ES la credencial. El `ownerId` que sale de
+ *     ahí es el que se le pasa a `withOwner()` para todo lo demás.
  *   - `rate_limits`, `platform_flags`: no son de tenant, son de la plataforma.
  *     No guardan nada de nadie (un contador por IP/email, un flag global).
  *   - `_prisma_migrations`: metadata de Prisma.
  * Toda tabla del PIPELINE con `owner_id`/`user_id` sí tiene política — la lista
  * es exactamente `TENANT_MODEL_FIELD` de abajo, y `scripts/qa-tenant-isolation.ts`
- * la verifica contra la DB en cada corrida de `npm run qa`.
+ * la verifica contra la DB en cada corrida de `npm run qa` comparando ambos
+ * conjuntos: si una tabla nueva se olvida de su política, o si alguien agrega una
+ * excepción sin declararla, el QA falla. La lista de excepciones de arriba está
+ * escrita ahí (`NON_TENANT_TABLES`) para que ninguna sea un hueco silencioso.
  *
  * Nota sobre el rol de la base: el runtime se conecta como `t4f_app`, que NO tiene
  * BYPASSRLS. Si alguien apunta DATABASE_URL a `neondb_owner` (que en Neon sí tiene
