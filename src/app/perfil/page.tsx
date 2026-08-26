@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { requireUserPage } from "@/lib/require-user";
 import { ProfileForms } from "@/components/ProfileForms";
+import { ApiKeysManager } from "@/components/ApiKeysManager";
 
 export const dynamic = "force-dynamic";
 export const metadata = { robots: { index: false, follow: false } };
@@ -27,6 +28,16 @@ export default async function PerfilPage() {
         initialEmail={user.email}
         hasPassword={credential !== null}
       />
+
+      <header className="mt-2">
+        <h2 className="section-heading text-ink">Claves de API</h2>
+        <p className="text-sm text-ink-subtle">
+          Conecta un agente (Claude Code, Claude Desktop, Cursor…) a tu propio banco de señales vía MCP.
+          Cada clave es un acceso independiente: crea una por agente y revócala cuando dejes de usarlo.
+        </p>
+      </header>
+
+      <ApiKeysManager />
     </div>
   );
 }

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.vercel
+
+# Secretos fuera; la plantilla dentro. El orden importa: en .gitignore gana la
+# ÚLTIMA regla que coincide, así que la negación va DESPUÉS del comodín. Al
+# revés (que es como estaba) `.env.example` quedaba excluido en silencio — y es
+# justo el archivo que el README manda copiar para arrancar.
+.env*
+!.env.example

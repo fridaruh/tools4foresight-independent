@@ -40,6 +40,22 @@ const items = await tx.likedItem.findMany({
 
 Ver `src/lib/tenant-db.ts` → `TENANT_MODEL_FIELD`.
 
+**Tablas SIN RLS, y por qué:** `users`, `sessions`, `accounts`, `verifications`,
+`api_keys`, `rate_limits`, `platform_flags`.
+
+`api_keys` es la excepción que hay que entender antes de tocarla: `resolveApiKey()`
+(`src/lib/api-keys.ts`) es **el query que descubre quién es el tenant** cuando la
+credencial es un `Bearer` y no una cookie. Corre antes de que exista un
+`app.owner_id` que fijar, así que con una política de RLS encima devolvería cero
+filas siempre y nadie podría autenticarse contra `/api/public/v1` ni contra el MCP —
+exactamente el mismo argumento circular que ya aplica a las tablas de better-auth.
+
+La compensación no es opcional: **todo** acceso a `api_keys` usa el `prisma` global
+(no `tenantClient`, que no la conoce) y lleva `userId` en el `where`, sin excepción.
+La única lectura sin `userId` es la del `keyHash`, y ese hash ES la credencial.
+`scripts/qa-tenant-isolation.ts` verifica que la lista de tablas sin política sea
+exactamente la declarada, para que ninguna excepción sea un hueco silencioso.
+
 ## 2. No mantener transacciones abiertas durante llamadas LLM/HTTP
 
 Las transacciones de Postgres (especialmente con el pooler de Neon) tienen timeout y limitan concurrencia. Una llamada a Claude o X API puede tardar segundos.
