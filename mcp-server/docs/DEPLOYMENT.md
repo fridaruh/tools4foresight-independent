@@ -34,6 +34,20 @@ Este servidor vive en `mcp-server/` dentro del repo de tools4foresight, pero es
 un **proyecto de Vercel aparte** del de la app: se despliega con este directorio
 como raíz, no con la raíz del repo.
 
+El proyecto está **conectado a este repo con `mcp-server/` como Root
+Directory**, así que un push a `main` lo despliega solo. No siempre fue así: al
+principio no había repo conectado y solo se desplegaba a mano, lo que dejaba una
+trampa fea — un push desplegaba **la app** (que sí estaba conectada al mismo
+repo) y dejaba el MCP viejo, dando la falsa señal de que todo se había
+actualizado. Si alguna vez se desconecta, ese es el fallo que hay que sospechar.
+
+El proyecto de la app lleva un `ignoreCommand` que salta su build cuando el
+commit solo toca `mcp-server/`. Este proyecto **no** lleva ninguno, a propósito:
+su build es un `echo` de dos segundos, y un build de sobra cuesta infinitamente
+menos que un deploy que falta en silencio.
+
+El primer alta (o un proyecto nuevo) sigue siendo:
+
 ```bash
 cd mcp-server
 vercel link          # proyecto NUEVO, distinto del de la app
@@ -53,7 +67,7 @@ cada persona tiene su propio banco, así que su MCP cuelga de su propia app —
 `individual.tools4foresight.com` → `mcp.individual.tools4foresight.com`. Son dos
 servidores distintos y las claves no son intercambiables.
 
-`vercel.json` fija `maxDuration: 60` para `api/mcp.ts` y desactiva la detección
+`vercel.json` fija `maxDuration: 15` para `api/mcp.ts` y desactiva la detección
 de framework (`framework: null` + un `buildCommand` que no hace nada): sin eso,
 Vercel toma el `package.json` por el arranque de un servidor y la función muere
 con *"Invalid export found in module server.js"*.
