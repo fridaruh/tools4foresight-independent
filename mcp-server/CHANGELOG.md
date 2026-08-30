@@ -11,6 +11,30 @@ persona tiene su propio banco de señales en tools4foresight y su propia API key
 decide cuál se lee. Es un cambio de modelo de auth y de dato, no una ampliación
 de features — la superficie de tools/resources/prompts se conserva igual.
 
+### Corregido
+
+- **El `GET /mcp` colgaba la función hasta el timeout y se comía la cuota de
+  memoria del plan.** En stateless (sin `sessionIdGenerator`) el SDK deja pasar
+  la validación de sesión, así que un GET abría el stream SSE "standalone", que
+  solo se cierra al cerrar el transporte — y aquí el transporte muere con la
+  petición. Resultado en producción: la función viva hasta agotar
+  `maxDuration`, el cliente reconectando al verla caer, y una invocación por
+  minuto 24/7 sin que nadie usara el servidor. Medido: **351,7 GB-Hrs y los 360
+  del mes en cuatro días**, con 10.455 timeouts de 10.929 invocaciones. Ahora el
+  GET (y el HEAD) responden **405 antes de mirar la auth**, como contempla la
+  spec de Streamable HTTP para un servidor que no ofrece stream en GET. No se
+  pierde nada: ese stream solo sirve para notificaciones fuera del ciclo de una
+  petición, que este servidor stateless ya renunció a tener. Fijado con red en
+  `tests/http-passthrough.test.ts`.
+- **El POST contesta JSON de una pieza** (`enableJsonResponse: true`) en vez de
+  un stream SSE. El SDK sí cerraba ese stream al responder, así que no colgaba,
+  pero mantener una conexión SSE viva para entregar un único objeto no aporta
+  nada cuando todas las tools son lecturas cortas, y sí añade un camino donde un
+  fallo deja la función respirando. Va en `handleMcpRequest`, compartido, para
+  que local y Vercel no puedan divergir.
+- **`maxDuration` de 60 s a 15 s** en `vercel.json`, como tope de daño: si algo
+  vuelve a colgarse, cuesta cuatro veces menos.
+
 ### Cambiado
 
 - **Cero credenciales dentro del servidor.** El servidor original llevaba

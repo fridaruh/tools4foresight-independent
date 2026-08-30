@@ -4,6 +4,6 @@
   "buildCommand": "echo 'sin build: api/mcp.ts lo compila el runtime de funciones'",
   "outputDirectory": ".",
   "functions": {
-    "api/mcp.ts": { "maxDuration": 60 }
+    "api/mcp.ts": { "maxDuration": 15 }
   }
 }

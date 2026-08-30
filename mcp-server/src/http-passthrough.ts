@@ -82,6 +82,43 @@ export function missingApiKeyResponse(): Response {
   return jsonError(401, "unauthorized", MISSING_REQUEST_API_KEY_MESSAGE);
 }
 
+/**
+ * 405 al `GET /mcp`, ANTES de mirar la auth: es un rechazo de método, no de
+ * identidad, y así un cliente sin clave tampoco se queda colgado.
+ *
+ * Por qué es obligatorio y no una optimización: en stateless (sin
+ * `sessionIdGenerator`) el SDK deja pasar la validación de sesión, así que un
+ * GET entra al handler del stream SSE "standalone", abre un `ReadableStream`
+ * con keep-alive y NO lo cierra nunca — solo se cerraría al cerrar el
+ * transporte, cosa que aquí no pasa porque el transporte muere con la
+ * petición. En una función serverless eso es una función viva hasta agotar
+ * `maxDuration`, contada como Timeout y facturada como memoria aprovisionada
+ * todo ese rato. El cliente ve la conexión caída, reconecta, y el bucle se
+ * repite una vez por minuto, 24/7, esté alguien usando el servidor o no.
+ * (Pasó: 351 GB-Hrs y la cuota mensual entera en cuatro días.)
+ *
+ * Y no perdemos nada: ese stream solo sirve para notificaciones
+ * servidor→cliente fuera del ciclo de una petición, que este servidor stateless
+ * ya renunció a tener a propósito. La spec de Streamable HTTP contempla
+ * exactamente esto: un servidor que no ofrece stream en GET debe responder 405.
+ */
+export function getNotAllowedResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: "method_not_allowed",
+        // Sin ruta literal: este archivo lo comparten el servidor local (`/mcp`)
+        // y Vercel (`/api/mcp`), así que nombrar una sería mentirle a la mitad.
+        message: "Este servidor MCP es stateless: no ofrece stream SSE en GET. Usa POST en esta misma ruta.",
+      },
+    }),
+    {
+      status: 405,
+      headers: { "content-type": "application/json; charset=utf-8", allow: "POST, DELETE" },
+    },
+  );
+}
+
 export type PassthroughOpts = {
   /** Opciones extra del transporte (p. ej. `allowedHosts` en el servidor local). */
   transport?: ConstructorParameters<typeof WebStandardStreamableHTTPServerTransport>[0];
@@ -98,6 +135,9 @@ export type PassthroughOpts = {
  * despliegue acabaría con la auth que nadie probó.
  */
 export async function handleMcpRequest(request: Request, opts: PassthroughOpts = {}): Promise<Response> {
+  // Antes que nada, y antes que la auth: ver `getNotAllowedResponse`.
+  if (request.method === "GET" || request.method === "HEAD") return getNotAllowedResponse();
+
   const apiKey = extractBearer(request);
   if (!apiKey) return missingApiKeyResponse();
 
@@ -120,7 +160,19 @@ export async function handleMcpRequest(request: Request, opts: PassthroughOpts =
     // Transporte, servidor y cliente HTTP nuevos por petición: es lo que hace
     // que dos tenants no compartan ni una estructura de datos (ver la cabecera
     // de este archivo).
-    const transport = new WebStandardStreamableHTTPServerTransport(opts.transport);
+    //
+    // `enableJsonResponse: true`: la respuesta al POST se devuelve como JSON de
+    // una pieza en vez de como un stream SSE que hay que cerrar. El SDK sí
+    // cierra ese stream al mandar la respuesta, así que no colgaba — pero
+    // mantener viva una conexión SSE para entregar un único objeto no aporta
+    // nada cuando todas las tools son lecturas cortas, y sí añade un camino en
+    // el que un fallo deja la función respirando hasta `maxDuration`. Va aquí y
+    // no en cada entry point para que local y Vercel no puedan divergir; el
+    // resto de `opts.transport` (p. ej. `allowedHosts` en local) se respeta.
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      ...opts.transport,
+      enableJsonResponse: true,
+    });
     const server = createServer(config);
     await server.connect(transport);
     return await transport.handleRequest(request);
